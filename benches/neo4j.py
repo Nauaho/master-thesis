@@ -1,7 +1,6 @@
-from neo4j import GraphDatabase
-
-from base import GraphBenchmarks, VectorBenchmarks, BenchmarkImportError, EXPECTED_NODE_COUNT, EXPECTED_EDGE_COUNT
 import time
+from neo4j import GraphDatabase
+from base import GraphBenchmarks, VectorBenchmarks, BenchmarkImportError, EXPECTED_NODE_COUNT, EXPECTED_EDGE_COUNT, timer
 
 class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
@@ -37,7 +36,43 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def ivf_index_build(self):
         print(f"[{self.db_name}] IVF index build not supported, skipping.")
-        return None
+
+    @timer
+    def hnsw_index_build(self):
+        self._exec("""
+            CREATE VECTOR INDEX `hnsw-embedding-index`
+            FOR (n:Subreddit) ON (n.embedding)
+            OPTIONS {indexConfig: {
+            `vector.dimensions`: 300,
+            `vector.similarity_function`: 'cosine'
+            }};
+        """)
+
+    @timer
+    def ann(self):
+        self._exec("""
+            CYPHER 25
+            MATCH (s:Subreddit)
+            WITH $queryVector AS queryVector
+            MATCH (similar:Subreddit)
+            SEARCH similar IN (
+                VECTOR INDEX `subreddit_embeddings`
+                FOR queryVector
+                LIMIT $k
+            )
+            SCORE score
+            RETURN similar.name AS name, score
+        """)
+
+    @timer
+    def knn(self):
+        self._exec("""
+            MATCH (s:Subreddit)
+            WHERE s.embedding IS NOT NULL
+            WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
+            RETURN s.name AS name, score
+            ORDER BY score DESC LIMIT $k
+        """)
 
     def __enter__(self):
         return self
