@@ -1,16 +1,28 @@
+# neo4j.py
 import time
 from neo4j import GraphDatabase
-from base import GraphBenchmarks, VectorBenchmarks, BenchmarkImportError, EXPECTED_NODE_COUNT, EXPECTED_EDGE_COUNT, timer
+from base import (
+    GraphBenchmarks,
+    VectorBenchmarks,
+    BenchmarkImportError,
+    EXPECTED_NODE_COUNT,
+    EXPECTED_EDGE_COUNT,
+    _timed_runs,
+)
+
+INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched before
+
 
 class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
-
     def __init__(self, port: int):
-        self._driver = GraphDatabase.driver(f"bolt://localhost:{port}", auth=("neo4j", "password"))
+        self._driver = GraphDatabase.driver(
+            f"bolt://localhost:{port}", auth=("neo4j", "password")
+        )
         self.db_name = "neo4j"
 
     def _exec(self, query, **params):
         return self._driver.execute_query(query, **params)
-        
+
     def import_data(self):
         try:
             self._exec("""
@@ -26,53 +38,94 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
         node_records, _, _ = self._exec("MATCH (n:Subreddit) RETURN count(n) AS node_count")
         edge_records, _, _ = self._exec("MATCH ()-[r:LINK_TO]->() RETURN count(r) AS edge_count")
-        node_count = node_records["node_count"]
-        edge_count = edge_records["edge_count"]
+
+        # bug fix: records is a LIST of Record objects — need [0] before indexing by key
+        node_count = node_records[0]["node_count"]
+        edge_count = edge_records[0]["edge_count"]
 
         if node_count != EXPECTED_NODE_COUNT or edge_count != EXPECTED_EDGE_COUNT:
-            raise BenchmarkImportError(f"Neo4j CSV load failed: some data was lost.\n Imported nodes: {node_count}\n Imported edges: {edge_count}")
-        else:
-            return node_count, edge_count
+            raise BenchmarkImportError(
+                f"Neo4j CSV load failed: some data was lost.\n"
+                f"Imported nodes: {node_count}\nImported edges: {edge_count}"
+            )
+        return node_count, edge_count
+
+    def _wait_index_online(self, index_name: str, timeout: int = 120):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            records, _, _ = self._exec(
+                "SHOW INDEXES YIELD name, state WHERE name = $name", name=index_name
+            )
+            if records and records[0]["state"] == "ONLINE":
+                return
+            time.sleep(0.5)
+        raise TimeoutError(f"Index {index_name} did not come online in time")
 
     def ivf_index_build(self):
         print(f"[{self.db_name}] IVF index build not supported, skipping.")
+        return None  # explicit — perform_vector_benchmarks checks for this
 
-    @timer
     def hnsw_index_build(self):
-        self._exec("""
-            CREATE VECTOR INDEX `hnsw-embedding-index`
+        def build():
+            self._exec(f"""
+                CREATE VECTOR INDEX `{INDEX_NAME}`
+                FOR (n:Subreddit) ON (n.embedding)
+                OPTIONS {{indexConfig: {{
+                    `vector.dimensions`: 300,
+                    `vector.similarity_function`: 'cosine'
+                }}}}
+            """)
+            self._wait_index_online(INDEX_NAME)
+
+        def drop():
+            self._exec(f"DROP INDEX `{INDEX_NAME}` IF EXISTS")
+
+        return _timed_runs(build, n=5, cleanup=drop)
+
+    def ann(self, index_type: str, query_vectors: dict[str, list[float]], k: int = 10):
+        if index_type == "ivf":
+            print(f"[{self.db_name}] IVF not supported, skipping ANN-IVF.")
+            return None
+        if index_type != "hnsw":
+            raise ValueError(f"Unknown index_type: {index_type}")
+
+        # one-time setup: build index BEFORE the timed loop, not per-rep
+        self._exec(f"""
+            CREATE VECTOR INDEX `{INDEX_NAME}`
             FOR (n:Subreddit) ON (n.embedding)
-            OPTIONS {indexConfig: {
-            `vector.dimensions`: 300,
-            `vector.similarity_function`: 'cosine'
-            }};
+            OPTIONS {{indexConfig: {{
+                `vector.dimensions`: 300,
+                `vector.similarity_function`: 'cosine'
+            }}}}
         """)
+        self._wait_index_online(INDEX_NAME)
 
-    @timer
-    def ann(self):
-        self._exec("""
-            CYPHER 25
-            MATCH (s:Subreddit)
-            WITH $queryVector AS queryVector
-            MATCH (similar:Subreddit)
-            SEARCH similar IN (
-                VECTOR INDEX `subreddit_embeddings`
-                FOR queryVector
-                LIMIT $k
-            )
-            SCORE score
-            RETURN similar.name AS name, score
-        """)
+        def run_query(vec):
+            return self._exec(f"""
+                CALL db.index.vector.queryNodes('{INDEX_NAME}', $k, $queryVector)
+                YIELD node, score
+                RETURN node.name, score
+            """, queryVector=vec, k=k)
 
-    @timer
-    def knn(self):
-        self._exec("""
-            MATCH (s:Subreddit)
-            WHERE s.embedding IS NOT NULL
-            WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
-            RETURN s.name AS name, score
-            ORDER BY score DESC LIMIT $k
-        """)
+        try:
+            # bug fix: dict.values() gives the vectors; original code iterated
+            # keys only (`for _, x in dict` doesn't work without .items())
+            return _timed_runs(run_query, inputs=list(query_vectors.values()))
+        finally:
+            # one-time teardown: drop AFTER all timed queries are done
+            self._exec(f"DROP INDEX `{INDEX_NAME}` IF EXISTS")
+
+    def knn(self, query_vectors: dict[str, list[float]], k: int = 10):
+        def run_query(vec):
+            return self._exec("""
+                MATCH (s:Subreddit)
+                WHERE s.embedding IS NOT NULL
+                WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
+                RETURN s.name AS name, score
+                ORDER BY score DESC LIMIT $k
+            """, queryVector=vec, k=k)
+
+        return _timed_runs(run_query, inputs=list(query_vectors.values()))
 
     def __enter__(self):
         return self
@@ -81,8 +134,8 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         self._driver.close()
         return False
 
+
 def wait_neo4j_ready(port: int, timeout: int = 60):
-    from neo4j import GraphDatabase
     deadline = time.time() + timeout
     last_err = None
     while time.time() < deadline:

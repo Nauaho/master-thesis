@@ -5,21 +5,28 @@ from abc import ABC, abstractmethod
 EXPECTED_NODE_COUNT = 87_220
 EXPECTED_EDGE_COUNT = 858_488
 
+
 class BenchmarkImportError(Exception):
     """Raised when import_data fails to populate the database."""
-    pass
 
-def timer(func):
-    """Custom helper decorator to make possible a measurement of 5 time measurements: average and standard deviation"""
-    def my_inner(*args, **kwargs):
-        time_list = []
-        for _ in range(5):
-            start = time.time()
-            func(*args, **kwargs)
-            end = time.time()
-            time_list.append(end - start)
-        return (np.mean(time_list) ,np.stdev(time_list))
-    return my_inner
+def _timed_runs(func, inputs: list | None, cleanup: callable | None, n: int = 5):
+    """
+    Core timing loop, called explicitly by benchmark methods.
+    - inputs: if given, times func(item) once per item (varying-input case).
+    - n: if inputs is None, times func() n times identically (repeated case).
+    - cleanup: optional callable() run after each timed rep.
+    Returns (mean, std) of elapsed times.
+    """
+    time_list = []
+    reps = inputs if inputs is not None else range(n)
+    for item in reps:
+        start = time.time()
+        func(item) if inputs is not None else func()
+        time_list.append(time.time() - start)
+        if cleanup is not None:
+            cleanup()
+    return (np.mean(time_list), np.std(time_list))
+
 
 class BaseBenchmarks(ABC):
     def _save(self, metric_name: str, results):
@@ -32,7 +39,7 @@ class BaseBenchmarks(ABC):
 
     @abstractmethod
     def import_data(self):
-        print("Implement the graph import") 
+        print("Implement the graph import")
 
     def perform_benchamrk(self):
         try:
@@ -41,7 +48,9 @@ class BaseBenchmarks(ABC):
             print(f"[{self.db_name}] Import failed, skipping benchmarks: {e}")
             return
         except Exception as e:
-            print(f"[{self.db_name}] Unexpected error during import, skipping benchmarks: {e}")
+            print(
+                f"[{self.db_name}] Unexpected error during import, skipping benchmarks: {e}"
+            )
             return
         if isinstance(self, VectorBenchmarks):
             self.perform_vector_benchmarks()
@@ -52,11 +61,10 @@ class BaseBenchmarks(ABC):
         return self
 
     @abstractmethod
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        ...
+    def __exit__(self, exc_type, exc_val, exc_tb): ...
+
 
 class GraphBenchmarks(BaseBenchmarks):
-
     @abstractmethod
     def aggregate_graph(self):
         print("Implement the graph aggregation")
@@ -77,7 +85,6 @@ class GraphBenchmarks(BaseBenchmarks):
 
 
 class VectorBenchmarks(BaseBenchmarks):
-
     @abstractmethod
     def hnsw_index_build(self):
         print("Implement the hnsw build")
@@ -88,19 +95,20 @@ class VectorBenchmarks(BaseBenchmarks):
 
     @abstractmethod
     def ann(self):
-        print("Implement the ann search")
+        print("Implement the ann search noth with IVF and HNSW indexes")
 
     @abstractmethod
     def knn(self):
         print("Implement the knn search")
 
     def perform_vector_benchmarks(self):
-        for metric, method in [
-            ("hnsw_index_build", self.hnsw_index_build),
-            ("ivf_index_build", self.ivf_index_build),
-            ("ann", self.ann),
-            ("knn", self.knn),
+        for metric, method, kwargs in [
+            ("hnsw_index_build", self.hnsw_index_build, {}),
+            ("ivf_index_build", self.ivf_index_build, {}),
+            ("ann_hnsw", self.ann, {"index_type": "hnsw"}),
+            ("ann_ivf", self.ann, {"index_type": "ivf"}),
+            ("knn", self.knn, {}),
         ]:
-            result = method()
+            result = method(**kwargs)
             if result is not None:
                 self._save(metric, result)

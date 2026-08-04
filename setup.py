@@ -15,9 +15,8 @@ CHROMA = "chromadb/chroma:1.5.8"
 
 client = docker.from_env()
 
-images = [
-    NEO4J, MONGO, FALCOR, POSTGRES, AGE, SURREAL, REDIS, CHROMA
-]
+images = [NEO4J, MONGO, FALCOR, POSTGRES, AGE, SURREAL, REDIS, CHROMA]
+
 
 def get_docker_client():
     return client
@@ -25,16 +24,19 @@ def get_docker_client():
 
 async def pull_one_image(image_ref: str):
     print(f"Pulling {image_ref}...")
-    image =await asyncio.to_thread(client.images.pull, image_ref)
+    image = await asyncio.to_thread(client.images.pull, image_ref)
     print(f"Pulled {image_ref}")
     return image
+
 
 async def pull_images() -> list:
     tasks = [pull_one_image(image_ref[0]) for image_ref in images]
     await asyncio.gather(*tasks)
 
+
 def setup():
     asyncio.run(pull_images())
+
 
 @dataclass
 class DBSpec:
@@ -42,7 +44,8 @@ class DBSpec:
     internal_port: int
     env: dict
     benchmark_cls: type
-    wait_ready: callable   # (port: int) -> None, raises on timeout
+    wait_ready: callable  # (port: int) -> None, raises on timeout
+
 
 db_specs = [
     DBSpec(
@@ -56,6 +59,7 @@ db_specs = [
     # DBSpec(image="mongo:7", ...),
 ]
 
+
 def run_all_benchmarks():
     client = get_docker_client()
 
@@ -67,22 +71,28 @@ def run_all_benchmarks():
             detach=True,
         )
         container.reload()  # ensure attrs reflect the assigned port
-        port_info = container.attrs['NetworkSettings']['Ports'][f'{spec.internal_port}/tcp']
+        port_info = container.attrs["NetworkSettings"]["Ports"][
+            f"{spec.internal_port}/tcp"
+        ]
 
         counter = 0
         while port_info is None and counter < 2:
             time.sleep(0.1)
-            container.reload() # yes, I know it's a repeat. IGAF  
-            port_info = container.attrs['NetworkSettings']['Ports'][f'{spec.internal_port}/tcp']
+            container.reload()  # yes, I know it's a repeat. IGAF
+            port_info = container.attrs["NetworkSettings"]["Ports"][
+                f"{spec.internal_port}/tcp"
+            ]
             counter += 1
 
         if port_info is None:
-            print(f"Couldn't get port information from {spec.image} container. Skipping benchmarks.")
+            print(
+                f"Couldn't get port information from {spec.image} container. Skipping benchmarks."
+            )
             container.stop()
             container.remove()
             continue
 
-        port = int(port_info[0]['HostPort'])
+        port = int(port_info[0]["HostPort"])
         try:
             spec.wait_ready(port)
             with spec.benchmark_cls(port) as bench:
