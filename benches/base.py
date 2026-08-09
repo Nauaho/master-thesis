@@ -1,32 +1,90 @@
 import time
 import numpy as np
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 
 EXPECTED_NODE_COUNT = 87_220
 EXPECTED_EDGE_COUNT = 858_488
+EXPECTED_EMBEDDED_NODE_COUNT = 51_278
+
+@dataclass
+class RepeatedOpResult:
+    """For ops with no cold/hot distinction — every rep is independently fresh
+    (e.g. index build+drop cycles)."""
+    runs: list[float]
+
+    @property
+    def avg(self) -> float:
+        return float(np.mean(self.runs))
+
+    @property
+    def std(self) -> float:
+        return float(np.std(self.runs))
 
 
-class BenchmarkImportError(Exception):
-    """Raised when import_data fails to populate the database."""
+@dataclass
+class BenchMarkResult:
+    """For query-style ops where cache state matters — first rep is cold,
+    remaining reps are hot (cache-warmed)."""
+    cold_run: float
+    hot_runs: list[float] = field(default_factory=list)
 
-def _timed_runs(func, inputs: list | None, cleanup: callable | None, n: int = 5):
-    """
-    Core timing loop, called explicitly by benchmark methods.
-    - inputs: if given, times func(item) once per item (varying-input case).
-    - n: if inputs is None, times func() n times identically (repeated case).
-    - cleanup: optional callable() run after each timed rep.
-    Returns (mean, std) of elapsed times.
-    """
-    time_list = []
-    reps = inputs if inputs is not None else range(n)
+    @property
+    def avg(self) -> float:
+        return float(np.mean(self.hot_runs))
+
+    @property
+    def std(self) -> float:
+        return float(np.std(self.hot_runs))
+
+
+@dataclass
+class MatchResult:
+    """For match_pattern: k different pattern lengths, each measured n times.
+    Keyed by pattern length -> BenchMarkResult for that length."""
+    by_pattern_length: dict[int, BenchMarkResult]
+
+
+def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> RepeatedOpResult:
+    times = []
+    for _ in range(n):
+        start = time.time()
+        func()
+        times.append(time.time() - start)
+        if cleanup is not None:
+            cleanup()
+    return RepeatedOpResult(runs=times)
+
+
+def _timed_runs(func, n: int = 5, inputs: list = None, cleanup: callable = None) -> BenchMarkResult:
+    """n identical reps, OR one rep per item in `inputs` if given."""
+    reps = inputs if inputs is not None else [None] * n
+    times = []
     for item in reps:
         start = time.time()
         func(item) if inputs is not None else func()
-        time_list.append(time.time() - start)
+        times.append(time.time() - start)
         if cleanup is not None:
             cleanup()
-    return (np.mean(time_list), np.std(time_list))
+    cold_run, *hot_runs = times
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
+
+def _timed_match(func, pattern_lengths: range, n: int = 5) -> MatchResult:
+    """func(pattern_length) run n times per pattern length (n x k total calls)."""
+    by_length = {}
+    for k in pattern_lengths:
+        times = []
+        for _ in range(n):
+            start = time.time()
+            func(k)
+            times.append(time.time() - start)
+        cold_run, *hot_runs = times
+        by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+    return MatchResult(by_pattern_length=by_length)
+
+class BenchmarkImportError(Exception):
+    """Raised when import_data fails to populate the database."""
 
 class BaseBenchmarks(ABC):
     def _save(self, metric_name: str, results):
