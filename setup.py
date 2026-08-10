@@ -3,6 +3,9 @@ import docker
 import time
 from dataclasses import dataclass
 from benches.neo4j import Neo4jBenchamrk, wait_neo4j_ready
+from pathlib import Path
+
+DATA_DIR = (Path(__file__).parent / "data").resolve()
 
 NEO4J = "neo4j:2026.04.0"
 MONGO = "mongo:8.0.21"
@@ -52,9 +55,12 @@ db_specs = [
     DBSpec(
         image=NEO4J,
         internal_port=7687,
-        env={"NEO4J_AUTH": "neo4j/password"},
+        env={"NEO4J_AUTH": "neo4j/password", "NEO4J_dbms_directories_import": "/import",},
         benchmark_cls=Neo4jBenchamrk,
         wait_ready=wait_neo4j_ready,
+        volumes={
+            str(DATA_DIR): {"bind": "/import", "mode": "ro"}
+        },
     ),
     # DBSpec(image="postgres:16", ...),
     # DBSpec(image="mongo:7", ...),
@@ -69,6 +75,7 @@ def run_all_benchmarks():
             spec.image,
             environment=spec.env,
             ports={f"{spec.internal_port}/tcp": None},
+            volumes=spec.volumes,
             detach=True,
         )
         container.reload()  # ensure attrs reflect the assigned port
