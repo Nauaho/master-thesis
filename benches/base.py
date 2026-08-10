@@ -1,7 +1,9 @@
 import time
+import csv
 import numpy as np
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import cached_property
 
 EXPECTED_NODE_COUNT = 87_220
 EXPECTED_EDGE_COUNT = 858_488
@@ -44,6 +46,28 @@ class MatchResult:
     Keyed by pattern length -> BenchMarkResult for that length."""
     by_pattern_length: dict[int, BenchMarkResult]
 
+def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
+    """Same query run n times identically — cold_run captures cache-miss cost,
+    hot_runs capture cache-warmed performance."""
+    times = []
+    for _ in range(n):
+        start = time.time()
+        func()
+        times.append(time.time() - start)
+        if cleanup is not None:
+            cleanup()
+    cold_run, *hot_runs = times
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+
+def _timed_per_input(func, inputs: list) -> RepeatedOpResult:
+    """One rep per distinct input — no cold/hot framing, since each rep is a
+    genuinely different query/operation, not a repeat of the same one."""
+    times = []
+    for item in inputs:
+        start = time.time()
+        func(item)
+        times.append(time.time() - start)
+    return RepeatedOpResult(runs=times)
 
 def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> RepeatedOpResult:
     times = []
@@ -54,21 +78,6 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> RepeatedOp
         if cleanup is not None:
             cleanup()
     return RepeatedOpResult(runs=times)
-
-
-def _timed_runs(func, n: int = 5, inputs: list = None, cleanup: callable = None) -> BenchMarkResult:
-    """n identical reps, OR one rep per item in `inputs` if given."""
-    reps = inputs if inputs is not None else [None] * n
-    times = []
-    for item in reps:
-        start = time.time()
-        func(item) if inputs is not None else func()
-        times.append(time.time() - start)
-        if cleanup is not None:
-            cleanup()
-    cold_run, *hot_runs = times
-    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
-
 
 def _timed_match(func, pattern_lengths: range, n: int = 5) -> MatchResult:
     """func(pattern_length) run n times per pattern length (n x k total calls)."""
@@ -90,16 +99,11 @@ class BaseBenchmarks(ABC):
     def _save(self, metric_name: str, results):
         np.save(f"{self.db_name}_{metric_name}_series.npy", results)
 
-    def _run_and_save(self, metric_name: str, method, *args, **kwargs):
-        result = method(*args, **kwargs)
-        self._save(metric_name, result)
-        return result
-
     @abstractmethod
     def import_data(self):
         print("Implement the graph import")
 
-    def perform_benchamrk(self):
+    def perform_benchmark(self):
         try:
             self.import_data()
         except BenchmarkImportError as e:
@@ -128,7 +132,7 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the graph aggregation")
 
     @abstractmethod
-    def match_pattern(self, n: int):
+    def match_pattern(self):
         print("Implement the matching pattern")
 
     @abstractmethod
@@ -136,13 +140,34 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the cycle detection")
 
     def perform_graph_benchmarks(self):
-        self._run_and_save("aggregation", self.aggregate_graph)
-        match_results = [self.match_pattern(n) for n in range(50)]
-        self._save("match", match_results)
-        self._run_and_save("cycle", self.cycle_detection)
+        self._save("aggregation", self.aggregate_graph())
+        self._save("match", self.match_pattern())
+        self._save("cycle", self.cycle_detection())
 
 
 class VectorBenchmarks(BaseBenchmarks):
+
+    @cached_property
+    def query_vectors_knn(self) -> dict[str, list[float]]:
+        return self._load_query_vectors("sample/input_vectors_1.csv")
+
+    @cached_property
+    def query_vectors_ann_hnsw(self) -> dict[str, list[float]]:
+        return self._load_query_vectors("sample/input_vectors_2.csv")
+
+    @cached_property
+    def query_vectors_ann_ivf(self) -> dict[str, list[float]]:
+        return self._load_query_vectors("sample/input_vectors_3.csv")
+
+    @staticmethod
+    def _load_query_vectors(path: str) -> dict[str, list[float]]:
+        vectors = {}
+        with open(path) as f:
+            reader = csv.reader(f)
+            for row in reader:
+                vectors[row[0]] = [float(x) for x in row[1:]]
+        return vectors
+
     @abstractmethod
     def hnsw_index_build(self):
         print("Implement the hnsw build")
@@ -163,9 +188,9 @@ class VectorBenchmarks(BaseBenchmarks):
         for metric, method, kwargs in [
             ("hnsw_index_build", self.hnsw_index_build, {}),
             ("ivf_index_build", self.ivf_index_build, {}),
-            ("ann_hnsw", self.ann, {"index_type": "hnsw"}),
-            ("ann_ivf", self.ann, {"index_type": "ivf"}),
-            ("knn", self.knn, {}),
+            ("ann_hnsw", self.ann, {"index_type": "hnsw", "query_vectors": self.query_vectors_ann_hnsw}),
+            ("ann_ivf", self.ann, {"index_type": "ivf", "query_vectors": self.query_vectors_ann_ivf}),
+            ("knn", self.knn, {"query_vectors": self.query_vectors_knn}),
         ]:
             result = method(**kwargs)
             if result is not None:

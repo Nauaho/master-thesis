@@ -8,9 +8,10 @@ from base import (
     EXPECTED_NODE_COUNT,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
-    _timed_runs,
+    _timed_repeated,
     _timed_index_build,
-    _timed_match
+    _timed_match,
+    _timed_per_input
 )
 
 INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched before
@@ -28,7 +29,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def import_data(self):
         try:
-            self._exec("CREATE CONSTRAINT FOR (s:Subreddit) REQUIRE s.name IS UNIQUE")
+            self._exec("CREATE CONSTRAINT IF NOT EXISTS FOR (s:Subreddit) REQUIRE s.name IS UNIQUE")
 
             for filename in ["soc-redditHyperlinks-body.tsv", "soc-redditHyperlinks-title.tsv"]:
                 self._exec(f"""
@@ -98,7 +99,14 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def hnsw_index_build(self):
         def build():
-            self._exec(f"CREATE VECTOR INDEX `{INDEX_NAME}` ...")
+            self._exec(f"""
+                CREATE VECTOR INDEX `{INDEX_NAME}`
+                FOR (n:Subreddit) ON (n.embedding)
+                OPTIONS {{indexConfig: {{
+                    `vector.dimensions`: 300,
+                    `vector.similarity_function`: 'cosine'
+                }}}}
+            """)
             self._wait_index_online(INDEX_NAME)
         def drop():
             self._exec(f"DROP INDEX `{INDEX_NAME}` IF EXISTS")
@@ -111,12 +119,12 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                 RETURN s.name AS subreddit, count(r) AS out_degree
                 ORDER BY out_degree DESC
             """)
-        return _timed_runs(run, n=5)
+        return _timed_repeated(run, n=5)
 
     def cycle_detection(self):
         def run():
             return self._exec("MATCH (s:Subreddit)-[:LINK_TO*2..5]->(s) RETURN count(*)")
-        return _timed_runs(run, n=5)
+        return _timed_repeated(run, n=5)
 
     def match_pattern(self):
         def run(pattern_len):
@@ -128,8 +136,14 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
-            return self._exec("...", queryVector=vec, k=k)
-        return _timed_runs(run_query, inputs=list(query_vectors.values()))
+            return self._exec("""
+                MATCH (s:Subreddit)
+                WHERE s.embedding IS NOT NULL
+                WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
+                RETURN s.name AS name, score
+                ORDER BY score DESC LIMIT $k
+            """, queryVector=vec, k=k)
+        return _timed_per_input(run_query, inputs=list(query_vectors.values()))
 
     def ann(self, index_type: str, query_vectors: dict[str, list[float]], k: int = 10):
         if index_type == "ivf":
@@ -159,7 +173,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         try:
             # bug fix: dict.values() gives the vectors; original code iterated
             # keys only (`for _, x in dict` doesn't work without .items())
-            return _timed_runs(run_query, inputs=list(query_vectors.values()))
+            return _timed_per_input(run_query, inputs=list(query_vectors.values()))
         finally:
             # one-time teardown: drop AFTER all timed queries are done
             self._exec(f"DROP INDEX `{INDEX_NAME}` IF EXISTS")

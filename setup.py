@@ -30,7 +30,7 @@ async def pull_one_image(image_ref: str):
 
 
 async def pull_images() -> list:
-    tasks = [pull_one_image(image_ref[0]) for image_ref in images]
+    tasks = [pull_one_image(image_ref) for image_ref in images]
     await asyncio.gather(*tasks)
 
 
@@ -44,7 +44,8 @@ class DBSpec:
     internal_port: int
     env: dict
     benchmark_cls: type
-    wait_ready: callable  # (port: int) -> None, raises on timeout
+    wait_ready: callable
+    volumes: dict = None
 
 
 db_specs = [
