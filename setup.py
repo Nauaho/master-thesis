@@ -3,6 +3,8 @@ import docker
 import time
 from dataclasses import dataclass
 from benches.neo4j import Neo4jBenchamrk, wait_neo4j_ready
+from benches.redis import RedisBenchmark, wait_redis_ready
+from benches.chroma import ChromaBenchmark, wait_chroma_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -65,8 +67,22 @@ db_specs = [
             str(DATA_DIR): {"bind": "/import", "mode": "ro"}
         },
     ),
-    # DBSpec(image="postgres:16", ...),
-    # DBSpec(image="mongo:7", ...),
+    DBSpec(
+        image=REDIS,
+        internal_port=6379,
+        env={},
+        benchmark_cls=RedisBenchmark,
+        wait_ready=wait_redis_ready,
+        volumes=None,
+    ),
+    DBSpec(
+        image=CHROMA,
+        internal_port=8000,
+        env={"IS_PERSISTENT": "TRUE"},
+        benchmark_cls=ChromaBenchmark,
+        wait_ready=wait_chroma_ready,
+        volumes=None,
+    )
 ]
 
 
@@ -113,4 +129,4 @@ def run_all_benchmarks():
         finally:
             print("Check container")
             container.stop()
-            container.remove()
+            container.remove(v=True)

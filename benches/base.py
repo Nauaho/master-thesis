@@ -114,8 +114,8 @@ class BaseBenchmarks(ABC):
             return
         if isinstance(self, VectorBenchmarks):
             self.perform_vector_benchmarks()
-        if isinstance(self, GraphBenchmarks):
-            self.perform_graph_benchmarks()
+        # if isinstance(self, GraphBenchmarks):
+        #     self.perform_graph_benchmarks()
 
     def __enter__(self):
         return self

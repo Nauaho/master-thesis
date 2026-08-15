@@ -2,7 +2,7 @@
 import time
 import csv
 import chromadb
-from base import (
+from .base import (
     _timed_per_input,
     VectorBenchmarks,
     BenchmarkImportError,
@@ -81,7 +81,7 @@ class ChromaBenchmark(VectorBenchmarks):
         def run(vec: list[float]):
             self._collection.query(query_embeddings=[vec], n_results=k)
 
-        return _timed_per_input(run, query_vectors.items())
+        return _timed_per_input(run, inputs=list(query_vectors.values()))
 
     def __enter__(self):
         return self

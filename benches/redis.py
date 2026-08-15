@@ -6,7 +6,7 @@ from redis.commands.search.field import VectorField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
 
-from base import (
+from .base import (
     VectorBenchmarks,
     BenchmarkImportError,
     _timed_index_build,
