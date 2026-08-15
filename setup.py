@@ -106,5 +106,6 @@ def run_all_benchmarks():
             with spec.benchmark_cls(port) as bench:
                 bench.perform_benchmark()
         finally:
-            container.stop()
-            container.remove()
+            print("Check container")
+            # container.stop()
+            # container.remove()

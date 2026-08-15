@@ -1,13 +1,15 @@
 import time
 import csv
+import json
 import numpy as np
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from functools import cached_property
+from pathlib import Path
 
-EXPECTED_NODE_COUNT = 87_220
+EXPECTED_NODE_COUNT = 87_211
 EXPECTED_EDGE_COUNT = 858_488
-EXPECTED_EMBEDDED_NODE_COUNT = 51_278
+EXPECTED_EMBEDDED_NODE_COUNT = 51_269
 
 @dataclass
 class RepeatedOpResult:
@@ -96,8 +98,13 @@ class BenchmarkImportError(Exception):
     """Raised when import_data fails to populate the database."""
 
 class BaseBenchmarks(ABC):
+
     def _save(self, metric_name: str, results):
-        np.save(f"{self.db_name}_{metric_name}_series.npy", results)
+        output_dir = Path("results") / self.db_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / f"{metric_name}_series.json"
+        with open(path, "w") as f:
+            json.dump(asdict(results), f, indent=2)
 
     @abstractmethod
     def import_data(self):
@@ -149,23 +156,35 @@ class VectorBenchmarks(BaseBenchmarks):
 
     @cached_property
     def query_vectors_knn(self) -> dict[str, list[float]]:
-        return self._load_query_vectors("sample/input_vectors_1.csv")
-
+        vectors = self._load_query_vectors("sample/input_vectors_1.csv")
+        for name, vec in vectors.items():
+            assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
+            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+        return vectors
+    
     @cached_property
     def query_vectors_ann_hnsw(self) -> dict[str, list[float]]:
-        return self._load_query_vectors("sample/input_vectors_2.csv")
+        vectors = self._load_query_vectors("sample/input_vectors_2.csv")
+        for name, vec in vectors.items():
+            assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
+            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+        return vectors
 
     @cached_property
     def query_vectors_ann_ivf(self) -> dict[str, list[float]]:
-        return self._load_query_vectors("sample/input_vectors_3.csv")
+        vectors = self._load_query_vectors("sample/input_vectors_3.csv")
+        for name, vec in vectors.items():
+            assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
+            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+        return vectors
 
     @staticmethod
     def _load_query_vectors(path: str) -> dict[str, list[float]]:
         vectors = {}
         with open(path) as f:
             reader = csv.reader(f)
-            for row in reader:
-                vectors[row[0]] = [float(x) for x in row[1:]]
+            for name, *vec in reader:
+                vectors[name] = [float(x) for x in vec]
         return vectors
 
     @abstractmethod

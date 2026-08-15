@@ -1,7 +1,7 @@
 # neo4j.py
 import time
 from neo4j import GraphDatabase
-from base import (
+from .base import (
     GraphBenchmarks,
     VectorBenchmarks,
     BenchmarkImportError,
@@ -27,12 +27,17 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def _exec(self, query, **params):
         return self._driver.execute_query(query, **params)
 
+    def _exec_autocommit(self, query, **params):
+        """Implicit/auto-commit transaction — required for CALL {...} IN TRANSACTIONS."""
+        with self._driver.session() as session:
+            return session.run(query, **params)
+        
     def import_data(self):
         try:
-            self._exec("CREATE CONSTRAINT IF NOT EXISTS FOR (s:Subreddit) REQUIRE s.name IS UNIQUE")
+            self._exec_autocommit("CREATE CONSTRAINT IF NOT EXISTS FOR (s:Subreddit) REQUIRE s.name IS UNIQUE")
 
             for filename in ["soc-redditHyperlinks-body.tsv", "soc-redditHyperlinks-title.tsv"]:
-                self._exec(f"""
+                self._exec_autocommit(f"""
                     LOAD CSV WITH HEADERS FROM 'file:///{filename}' AS row
                     FIELDTERMINATOR '\\t'
                     CALL (row) {{
@@ -48,12 +53,16 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                     }} IN TRANSACTIONS OF 5000 ROWS
                 """)
 
-            self._exec("""
+            self._exec_autocommit("""
                 LOAD CSV FROM 'file:///web-redditEmbeddings-subreddits.csv' AS row
                 CALL (row) {
                     WITH row
+                    WITH row, [x IN row[1..] | toFloat(x)] AS emb
+                    WHERE size(emb) = 300
+                    AND NONE(x IN emb WHERE x IS NULL)
+                    AND ANY(x IN emb WHERE x <> 0.0)
                     MERGE (s:Subreddit {name: row[0]})
-                    SET s.embedding = [x IN row[1..] | toFloat(x)]
+                    SET s.embedding = emb
                 } IN TRANSACTIONS OF 1000 ROWS
             """)
         except Exception as e:
@@ -77,6 +86,27 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         if edge_count != EXPECTED_EDGE_COUNT:
             errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
 
+        # NEW: validate embedding shape/content, not just presence
+        bad_length_records, _, _ = self._exec("""
+            MATCH (s:Subreddit) WHERE s.embedding IS NOT NULL
+            WITH s, size(s.embedding) AS len
+            WHERE len <> 300
+            RETURN count(s) AS c
+        """)
+        bad_length_count = bad_length_records[0]["c"]
+        if bad_length_count != 0:
+            errors.append(f"embedding dimension mismatch: {bad_length_count} node(s) have embedding length != 300")
+
+        null_element_records, _, _ = self._exec("""
+            MATCH (s:Subreddit) WHERE s.embedding IS NOT NULL
+            WITH s, [x IN s.embedding WHERE x IS NULL] AS nulls
+            WHERE size(nulls) > 0
+            RETURN count(s) AS c
+        """)
+        null_element_count = null_element_records[0]["c"]
+        if null_element_count != 0:
+            errors.append(f"embedding contains null elements: {null_element_count} node(s) affected")
+
         if errors:
             raise BenchmarkImportError("Neo4j import validation failed:\n" + "\n".join(errors))
 
@@ -95,7 +125,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def ivf_index_build(self):
         print(f"[{self.db_name}] IVF index build not supported, skipping.")
-        return None  # explicit — perform_vector_benchmarks checks for this
+        return None
 
     def hnsw_index_build(self):
         def build():
@@ -123,7 +153,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
 
     def cycle_detection(self):
         def run():
-            return self._exec("MATCH (s:Subreddit)-[:LINK_TO*2..5]->(s) RETURN count(*)")
+            return self._exec("MATCH (s:Subreddit)-[:LINK_TO*]->(s) RETURN count(*)")
         return _timed_repeated(run, n=5)
 
     def match_pattern(self):
@@ -132,7 +162,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                 MATCH p = (s:Subreddit)-[:LINK_TO*{pattern_len}]->(t:Subreddit)
                 RETURN count(p) AS path_count
             """)
-        return _timed_match(run, pattern_lengths=range(1, 51), n=5)
+        return _timed_match(run, pattern_lengths=range(1, 21), n=5)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
