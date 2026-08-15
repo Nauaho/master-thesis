@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "asyncio>=4.0.0",
+    "chromadb>=1.5.9",
     "docker>=7.1.0",
     "neo4j>=6.2.0",
     "numpy>=2.4.5",

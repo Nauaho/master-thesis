@@ -12,21 +12,6 @@ EXPECTED_EDGE_COUNT = 858_488
 EXPECTED_EMBEDDED_NODE_COUNT = 51_269
 
 @dataclass
-class RepeatedOpResult:
-    """For ops with no cold/hot distinction — every rep is independently fresh
-    (e.g. index build+drop cycles)."""
-    runs: list[float]
-
-    @property
-    def avg(self) -> float:
-        return float(np.mean(self.runs))
-
-    @property
-    def std(self) -> float:
-        return float(np.std(self.runs))
-
-
-@dataclass
 class BenchMarkResult:
     """For query-style ops where cache state matters — first rep is cold,
     remaining reps are hot (cache-warmed)."""
@@ -40,6 +25,10 @@ class BenchMarkResult:
     @property
     def std(self) -> float:
         return float(np.std(self.hot_runs))
+
+    @property
+    def runs(self) -> list[float]:
+        return [self.cold_run, *self.hot_runs]
 
 
 @dataclass
@@ -61,7 +50,7 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
-def _timed_per_input(func, inputs: list) -> RepeatedOpResult:
+def _timed_per_input(func, inputs: list) -> BenchMarkResult:
     """One rep per distinct input — no cold/hot framing, since each rep is a
     genuinely different query/operation, not a repeat of the same one."""
     times = []
@@ -69,9 +58,10 @@ def _timed_per_input(func, inputs: list) -> RepeatedOpResult:
         start = time.time()
         func(item)
         times.append(time.time() - start)
-    return RepeatedOpResult(runs=times)
+    cold_run, *hot_runs = times
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
-def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> RepeatedOpResult:
+def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
     times = []
     for _ in range(n):
         start = time.time()
@@ -79,7 +69,8 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> RepeatedOp
         times.append(time.time() - start)
         if cleanup is not None:
             cleanup()
-    return RepeatedOpResult(runs=times)
+    cold_run, *hot_runs = times
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
 def _timed_match(func, pattern_lengths: range, n: int = 5) -> MatchResult:
     """func(pattern_length) run n times per pattern length (n x k total calls)."""
@@ -147,9 +138,13 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the cycle detection")
 
     def perform_graph_benchmarks(self):
+        print(f"[{self.db_name}] Performing aggregation benchamrk.")
         self._save("aggregation", self.aggregate_graph())
+        print(f"[{self.db_name}] Performing matching benchamrk.")
         self._save("match", self.match_pattern())
+        print(f"[{self.db_name}] Performing cycle detection benchamrk.")
         self._save("cycle", self.cycle_detection())
+        print(f"[{self.db_name}] Graph benchamrks completed.")
 
 
 class VectorBenchmarks(BaseBenchmarks):
@@ -204,13 +199,16 @@ class VectorBenchmarks(BaseBenchmarks):
         print("Implement the knn search")
 
     def perform_vector_benchmarks(self):
-        for metric, method, kwargs in [
-            ("hnsw_index_build", self.hnsw_index_build, {}),
-            ("ivf_index_build", self.ivf_index_build, {}),
-            ("ann_hnsw", self.ann, {"index_type": "hnsw", "query_vectors": self.query_vectors_ann_hnsw}),
-            ("ann_ivf", self.ann, {"index_type": "ivf", "query_vectors": self.query_vectors_ann_ivf}),
-            ("knn", self.knn, {"query_vectors": self.query_vectors_knn}),
+        for metric_name, metric, method, kwargs in [
+            ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
+            ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
+            ("ANN Search on HNSW Index", "ann_hnsw", self.ann, {"index_type": "hnsw", "query_vectors": self.query_vectors_ann_hnsw}),
+            ("ANN Search on IVF Index", "ann_ivf", self.ann, {"index_type": "ivf", "query_vectors": self.query_vectors_ann_ivf}),
+            ("KNN Search", "knn", self.knn, {"query_vectors": self.query_vectors_knn}),
         ]:
+            print(f"[{self.db_name}] Benchmarking {metric_name}.")
             result = method(**kwargs)
             if result is not None:
                 self._save(metric, result)
+
+        print(f"[{self.db_name}] Vector benchamrks complete.")

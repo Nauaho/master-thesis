@@ -162,7 +162,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                 MATCH p = (s:Subreddit)-[:LINK_TO*{pattern_len}]->(t:Subreddit)
                 RETURN count(p) AS path_count
             """)
-        return _timed_match(run, pattern_lengths=range(1, 21), n=5)
+        return _timed_match(run, pattern_lengths=range(1, 10), n=5)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):

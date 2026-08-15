@@ -9,10 +9,9 @@ from redis.commands.search.query import Query
 from base import (
     VectorBenchmarks,
     BenchmarkImportError,
-    RepeatedOpResult,
-    BenchMarkResult,
     _timed_index_build,
     _timed_per_input,
+    EXPECTED_EMBEDDED_NODE_COUNT
 )
 
 VECTOR_DIM = 300
@@ -47,6 +46,8 @@ class RedisBenchmark(VectorBenchmarks):
             raise BenchmarkImportError(f"Redis import failed: {e}") from e
 
         actual = len(list(self._r.scan_iter(f"{DOC_PREFIX}*")))
+        if actual != EXPECTED_EMBEDDED_NODE_COUNT:
+            raise BenchmarkImportError("Redis import validation failed:\n number of embeddings expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}")
         return actual
 
     def ivf_index_build(self):
@@ -55,10 +56,6 @@ class RedisBenchmark(VectorBenchmarks):
 
     def hnsw_index_build(self):
         def build():
-            try:
-                self._r.ft(HNSW_INDEX).dropindex(delete_documents=False)
-            except redis.exceptions.ResponseError:
-                pass
             self._r.ft(HNSW_INDEX).create_index(
                 [VectorField("embedding", "HNSW", {
                     "TYPE": "FLOAT32", "DIM": VECTOR_DIM, "DISTANCE_METRIC": "COSINE",
@@ -114,21 +111,13 @@ class RedisBenchmark(VectorBenchmarks):
             definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
         )
 
-        first = True
         def run_query(vec):
-            nonlocal first
             vec_bytes = np.array(vec, dtype=np.float32).tobytes()
             q = Query(f"*=>[KNN {k} @embedding $vec AS score]").sort_by("score").dialect(2)
             return self._r.ft(HNSW_INDEX).search(q, query_params={"vec": vec_bytes})
 
         try:
-            times = []
-            for vec in query_vectors.values():
-                start = time.time()
-                run_query(vec)
-                times.append(time.time() - start)
-            cold_run, *hot_runs = times
-            return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+            return _timed_per_input(run_query, inputs=list(query_vectors.values()))
         finally:
             self._r.ft(HNSW_INDEX).dropindex(delete_documents=False)
 

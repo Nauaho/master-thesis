@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from benches.neo4j import Neo4jBenchamrk, wait_neo4j_ready
 from pathlib import Path
 
+CPU_QUOTA = 4_000_000_000
+MEM_QUOTA = "16g"
+
 DATA_DIR = (Path(__file__).parent / "data").resolve()
 
 NEO4J = "neo4j:2026.04.0"
@@ -77,6 +80,8 @@ def run_all_benchmarks():
             ports={f"{spec.internal_port}/tcp": None},
             volumes=spec.volumes,
             detach=True,
+            nano_cpus=CPU_QUOTA,
+            mem_limit=MEM_QUOTA
         )
         container.reload()  # ensure attrs reflect the assigned port
         port_info = container.attrs["NetworkSettings"]["Ports"][
@@ -107,5 +112,5 @@ def run_all_benchmarks():
                 bench.perform_benchmark()
         finally:
             print("Check container")
-            # container.stop()
-            # container.remove()
+            container.stop()
+            container.remove()
