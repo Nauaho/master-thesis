@@ -12,6 +12,7 @@ CPU_QUOTA = 4_000_000_000
 MEM_QUOTA = "16g"
 
 DATA_DIR = (Path(__file__).parent / "data").resolve()
+PGTUNE_CONF = (Path(__file__).parent / "config" / "pgtune.conf").resolve()
 
 NEO4J = "neo4j:2026.04.0"
 MONGO = "mongo:8.0.21"
@@ -56,13 +57,20 @@ class DBSpec:
     benchmark_cls: type
     wait_ready: callable
     volumes: dict = None
+    command: list = None
 
 
 db_specs = [
     DBSpec(
         image=NEO4J,
         internal_port=7687,
-        env={"NEO4J_AUTH": "neo4j/password", "NEO4J_dbms_directories_import": "/import",},
+        env={
+            "NEO4J_AUTH": "neo4j/password",
+            "NEO4J_dbms_directories_import": "/import",
+            "NEO4J_server_memory_heap_initial__size": "5g",
+            "NEO4J_server_memory_heap_max__size": "5g",
+            "NEO4J_server_memory_pagecache_size": "7g"
+        },
         benchmark_cls=Neo4jBenchamrk,
         wait_ready=wait_neo4j_ready,
         volumes={
@@ -76,6 +84,7 @@ db_specs = [
         benchmark_cls=RedisBenchmark,
         wait_ready=wait_redis_ready,
         volumes=None,
+        command=["redis-server", "--maxmemory", "14gb"]
     ),
     DBSpec(
         image=CHROMA,
@@ -91,6 +100,10 @@ db_specs = [
         env={"POSTGRES_PASSWORD": "password"},
         benchmark_cls=PgVectorBenchmark,
         wait_ready=wait_pgvector_ready,
+        volumes={
+            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+        },
+        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     )
 ]
 
@@ -106,7 +119,8 @@ def run_all_benchmarks():
             volumes=spec.volumes,
             detach=True,
             nano_cpus=CPU_QUOTA,
-            mem_limit=MEM_QUOTA
+            mem_limit=MEM_QUOTA,
+            command=spec.command
         )
         container.reload()  # ensure attrs reflect the assigned port
         port_info = container.attrs["NetworkSettings"]["Ports"][

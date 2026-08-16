@@ -114,8 +114,8 @@ class BaseBenchmarks(ABC):
             return
         if isinstance(self, VectorBenchmarks):
             self.perform_vector_benchmarks()
-        # if isinstance(self, GraphBenchmarks):
-        #     self.perform_graph_benchmarks()
+        if isinstance(self, GraphBenchmarks):
+            self.perform_graph_benchmarks()
 
     def __enter__(self):
         return self
@@ -141,8 +141,8 @@ class GraphBenchmarks(BaseBenchmarks):
         print(f"[{self.db_name}] Performing aggregation benchamrk.")
         self._save("aggregation", self.aggregate_graph())
         print(f"[{self.db_name}] Performing matching benchamrk.")
-        self._save("match", self.match_pattern())
-        print(f"[{self.db_name}] Performing cycle detection benchamrk.")
+        # self._save("match", self.match_pattern())
+        # print(f"[{self.db_name}] Performing cycle detection benchamrk.")
         self._save("cycle", self.cycle_detection())
         print(f"[{self.db_name}] Graph benchamrks completed.")
 
