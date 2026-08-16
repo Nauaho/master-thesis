@@ -145,9 +145,9 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def aggregate_graph(self):
         def run():
             return self._exec("""
-                MATCH (s:Subreddit)-[r:LINK_TO]->()
-                RETURN s.name AS subreddit, count(r) AS out_degree
-                ORDER BY out_degree DESC
+                MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
+                RETURN s.name AS source, t.name AS target, sum(r.sentimentScore) AS sentiment, count(r) AS linkCount
+                ORDER BY sentiment DESC
             """)
         return _timed_repeated(run, n=5)
 

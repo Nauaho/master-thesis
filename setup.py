@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from benches.neo4j import Neo4jBenchamrk, wait_neo4j_ready
 from benches.redis import RedisBenchmark, wait_redis_ready
 from benches.chroma import ChromaBenchmark, wait_chroma_ready
+from benches.pgvector import PgVectorBenchmark, wait_pgvector_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -20,10 +21,11 @@ AGE = "apache/age:release_PG18_1.7.0"
 SURREAL = "surrealdb/surrealdb:v3.0.5"
 REDIS = "redis:8.6.2-trixie"
 CHROMA = "chromadb/chroma:1.5.8"
+PGVECTOR = "pgvector/pgvector:0.8.6-pg18-trixie"
 
 client = docker.from_env()
 
-images = [NEO4J, MONGO, FALCOR, POSTGRES, AGE, SURREAL, REDIS, CHROMA]
+images = [NEO4J, MONGO, FALCOR, POSTGRES, AGE, SURREAL, REDIS, CHROMA, PGVECTOR]
 
 
 def get_docker_client():
@@ -82,6 +84,13 @@ db_specs = [
         benchmark_cls=ChromaBenchmark,
         wait_ready=wait_chroma_ready,
         volumes=None,
+    ),
+    DBSpec(
+        image=PGVECTOR,
+        internal_port=5432,
+        env={"POSTGRES_PASSWORD": "password"},
+        benchmark_cls=PgVectorBenchmark,
+        wait_ready=wait_pgvector_ready,
     )
 ]
 
