@@ -10,6 +10,16 @@ from pathlib import Path
 EXPECTED_NODE_COUNT = 87_211
 EXPECTED_EDGE_COUNT = 858_488
 EXPECTED_EMBEDDED_NODE_COUNT = 51_269
+EXPECTED_EDGE_AGG_COUNT = 339_643
+
+MATCH_AGG_MAX = 5
+GRAPH_QUERY_SUBREDDITS = [
+    "shitamericanssay",
+    "botsrights",
+    "gaming",
+    "shitpost",
+    "conspiracy",
+]
 
 @dataclass
 class BenchMarkResult:
@@ -72,14 +82,14 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkR
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
-def _timed_match(func, pattern_lengths: range, n: int = 5) -> MatchResult:
+def _timed_match(func, pattern_lengths: range, inputs: list[str]) -> MatchResult:
     """func(pattern_length) run n times per pattern length (n x k total calls)."""
     by_length = {}
     for k in pattern_lengths:
         times = []
-        for _ in range(n):
+        for item in inputs:
             start = time.time()
-            func(k)
+            func(k, item)
             times.append(time.time() - start)
         cold_run, *hot_runs = times
         by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
@@ -112,11 +122,13 @@ class BaseBenchmarks(ABC):
                 f"[{self.db_name}] Unexpected error during import, skipping benchmarks: {e}"
             )
             return
-        if isinstance(self, VectorBenchmarks):
-            self.perform_vector_benchmarks()
+        
         if isinstance(self, GraphBenchmarks):
             self.perform_graph_benchmarks()
-
+        
+        # if isinstance(self, VectorBenchmarks):
+        #     self.perform_vector_benchmarks()
+        
     def __enter__(self):
         return self
 
@@ -130,21 +142,36 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the graph aggregation")
 
     @abstractmethod
-    def match_pattern(self):
+    def match_pattern(self, pattern_lengths: range, subreddit_names: list[str], category: str):
         print("Implement the matching pattern")
 
     @abstractmethod
-    def cycle_detection(self):
+    def cycle_detection(self, pattern_lengths: range, subreddit_names: list[str], category: str):
         print("Implement the cycle detection")
 
+    @abstractmethod
+    def persist_aggregation(self): 
+        print("Implement the peristance of aggregation")
+
     def perform_graph_benchmarks(self):
-        print(f"[{self.db_name}] Performing aggregation benchamrk.")
-        self._save("aggregation", self.aggregate_graph())
-        print(f"[{self.db_name}] Performing matching benchamrk.")
-        # self._save("match", self.match_pattern())
-        # print(f"[{self.db_name}] Performing cycle detection benchamrk.")
-        self._save("cycle", self.cycle_detection())
-        print(f"[{self.db_name}] Graph benchamrks completed.")
+        subreddit_names = GRAPH_QUERY_SUBREDDITS
+
+        # print(f"[{self.db_name}] Performing aggregation benchmark.")
+        # self._save("aggregation", self.aggregate_graph())
+
+        print(f"[{self.db_name}] Persisting aggregated edges.")
+        self.persist_aggregation()
+
+        for category in ("positive", "negative"):
+            print(f"[{self.db_name}] Performing matching benchmark ({category}).")
+            self._save(
+                f"match_{category}",
+                self.match_pattern(range(1, MATCH_AGG_MAX + 1), subreddit_names, category)
+            )
+            print(f"[{self.db_name}] Performing cycle detection benchmark ({category}).")
+            self._save(f"cycle_{category}", self.cycle_detection(range(2, MATCH_AGG_MAX + 1), subreddit_names, category))
+
+        print(f"[{self.db_name}] Graph benchmarks completed.")
 
 
 class VectorBenchmarks(BaseBenchmarks):

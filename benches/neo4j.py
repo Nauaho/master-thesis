@@ -7,6 +7,7 @@ from .base import (
     BenchmarkImportError,
     EXPECTED_NODE_COUNT,
     EXPECTED_EDGE_COUNT,
+    EXPECTED_EDGE_AGG_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
     _timed_repeated,
     _timed_index_build,
@@ -142,6 +143,27 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
             self._exec(f"DROP INDEX `{INDEX_NAME}` IF EXISTS")
         return _timed_index_build(build, n=5, cleanup=drop)
 
+    def persist_aggregation(self):
+        self._exec_autocommit("""
+            MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
+            WITH s, t, avg(r.sentimentScore) AS sentiment, count(r) AS linkCount
+            CALL (s, t, sentiment, linkCount) {
+                MERGE (s)-[agg:LINK_TO_AGG]->(t)
+                SET agg.sentiment = sentiment, agg.linkCount = linkCount
+            } IN TRANSACTIONS OF 5000 ROWS
+        """)
+
+        self._exec("""
+            CREATE INDEX agg_link_sentiment FOR ()-[r:LINK_TO]->() ON (r.sentiment);
+        """)
+
+        edge_agg_records, _, _ = self._exec("MATCH ()-[r:LINK_TO_AGG]->() RETURN count(r) AS c")
+        edge_agg_count = edge_agg_records[0]["c"]  # fixed: was comparing the raw records list, not the count
+        if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
+            raise BenchmarkImportError(
+                f"Neo4j import validation failed:\nexpected {EXPECTED_EDGE_AGG_COUNT} aggregated edges, got {edge_agg_count}"
+            )
+
     def aggregate_graph(self):
         def run():
             return self._exec("""
@@ -151,18 +173,33 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
             """)
         return _timed_repeated(run, n=5)
 
-    def cycle_detection(self):
-        def run():
-            return self._exec("MATCH (s:Subreddit)-[:LINK_TO*]->(s) RETURN count(*)")
-        return _timed_repeated(run, n=5)
+    @staticmethod
+    def _sentiment_op(category: str) -> str:
+        if category == "positive":
+            return ">= 0"
+        if category == "negative":
+            return "< 0"
+        raise ValueError(f"Unknown category: {category}")
 
-    def match_pattern(self):
-        def run(pattern_len):
+    def cycle_detection(self, cycle_lengths: range, subreddit_names: list[str], category: str = "positive"):
+        op = self._sentiment_op(category)
+        def run(pattern_len: int, name: str):
             return self._exec(f"""
-                MATCH p = (s:Subreddit)-[:LINK_TO*{pattern_len}]->(t:Subreddit)
-                RETURN count(p) AS path_count
-            """)
-        return _timed_match(run, pattern_lengths=range(1, 10), n=5)
+                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->{{{pattern_len}}}(s)
+                WHERE all(r IN relationships(p) WHERE r.sentiment {op})
+                RETURN p LIMIT 500
+            """, name=name)
+        return _timed_match(run, cycle_lengths, subreddit_names)
+
+    def match_pattern(self, pattern_lengths: range, subreddit_names: list[str], category: str = "positive"):
+        op = self._sentiment_op(category)
+        def run(pattern_len: int, name: str):
+            return self._exec(f"""
+                MATCH p = ACYCLIC (t:Subreddit)-[:LINK_TO_AGG]->{{{pattern_len}}}(s:Subreddit {{name: $name}})
+                WHERE all(r IN relationships(p) WHERE r.sentiment {op})
+                RETURN p LIMIT 500
+            """, name=name)
+        return _timed_match(run, pattern_lengths, subreddit_names)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
