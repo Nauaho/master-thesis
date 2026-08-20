@@ -20,6 +20,7 @@ GRAPH_QUERY_SUBREDDITS = [
     "shitpost",
     "conspiracy",
 ]
+LINKS_CATEGORIES = ("positive", "negative")
 
 @dataclass
 class BenchMarkResult:
@@ -142,34 +143,36 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the graph aggregation")
 
     @abstractmethod
-    def match_pattern(self, pattern_lengths: range, subreddit_names: list[str], category: str):
-        print("Implement the matching pattern")
-
+    def common_neighbour_match(self, subreddit_names: list[str]):
+        print("Implement the neighbour search")
+    
     @abstractmethod
-    def cycle_detection(self, pattern_lengths: range, subreddit_names: list[str], category: str):
+    def cycle_detection(self, subreddit_names: list[str], category: str):
         print("Implement the cycle detection")
 
-    @abstractmethod
-    def persist_aggregation(self): 
-        print("Implement the peristance of aggregation")
+    @staticmethod
+    def _sentiment_op(category: str) -> str:
+        if category == "positive":
+            return ">= 0"
+        if category == "negative":
+            return "< 0"
+        raise ValueError(f"Unknown category: {category}")
 
     def perform_graph_benchmarks(self):
         subreddit_names = GRAPH_QUERY_SUBREDDITS
 
-        # print(f"[{self.db_name}] Performing aggregation benchmark.")
-        # self._save("aggregation", self.aggregate_graph())
+        print(f"[{self.db_name}] Performing aggregation benchmark.")
+        self._save("aggregation", self.aggregate_graph())
 
         print(f"[{self.db_name}] Persisting aggregated edges.")
         self.persist_aggregation()
 
+        print(f"[{self.db_name}] Performing common-neighbour match benchmark.")
+        self._save("common_neighbour_match", self.common_neighbour_match(subreddit_names))
+
         for category in ("positive", "negative"):
-            print(f"[{self.db_name}] Performing matching benchmark ({category}).")
-            self._save(
-                f"match_{category}",
-                self.match_pattern(range(1, MATCH_AGG_MAX + 1), subreddit_names, category)
-            )
             print(f"[{self.db_name}] Performing cycle detection benchmark ({category}).")
-            self._save(f"cycle_{category}", self.cycle_detection(range(2, MATCH_AGG_MAX + 1), subreddit_names, category))
+            self._save(f"cycle_{category}", self.cycle_detection(subreddit_names, category))
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 

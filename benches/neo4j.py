@@ -11,7 +11,6 @@ from .base import (
     EXPECTED_EMBEDDED_NODE_COUNT,
     _timed_repeated,
     _timed_index_build,
-    _timed_match,
     _timed_per_input
 )
 
@@ -154,7 +153,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         """)
 
         self._exec("""
-            CREATE INDEX agg_link_sentiment FOR ()-[r:LINK_TO]->() ON (r.sentiment);
+            CREATE INDEX agg_link_sentiment FOR ()-[r:LINK_TO_AGG]->() ON (r.sentiment);
         """)
 
         edge_agg_records, _, _ = self._exec("MATCH ()-[r:LINK_TO_AGG]->() RETURN count(r) AS c")
@@ -173,33 +172,30 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
             """)
         return _timed_repeated(run, n=5)
 
-    @staticmethod
-    def _sentiment_op(category: str) -> str:
-        if category == "positive":
-            return ">= 0"
-        if category == "negative":
-            return "< 0"
-        raise ValueError(f"Unknown category: {category}")
-
-    def cycle_detection(self, cycle_lengths: range, subreddit_names: list[str], category: str = "positive"):
-        op = self._sentiment_op(category)
-        def run(pattern_len: int, name: str):
-            return self._exec(f"""
-                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->{{{pattern_len}}}(s)
-                WHERE all(r IN relationships(p) WHERE r.sentiment {op})
-                RETURN p LIMIT 500
+    def common_neighbour_match(self, subreddit_names: list[str]):
+        def run(name: str):
+            return self._exec("""
+                MATCH (s:Subreddit {name: $name})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+                WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
+                    AND NOT EXISTS { (s)-[:LINK_TO_AGG]->(newFriend) }
+                    AND NOT EXISTS { (newFriend)-[:LINK_TO_AGG]->(s) }
+                RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
+                ORDER BY delta_interest DESC
+                LIMIT 100
             """, name=name)
-        return _timed_match(run, cycle_lengths, subreddit_names)
+        return _timed_per_input(run, subreddit_names)
 
-    def match_pattern(self, pattern_lengths: range, subreddit_names: list[str], category: str = "positive"):
+    def cycle_detection(self, subreddit_names: list[str], category: str = "positive"):
         op = self._sentiment_op(category)
-        def run(pattern_len: int, name: str):
+        def run(name: str):
             return self._exec(f"""
-                MATCH p = ACYCLIC (t:Subreddit)-[:LINK_TO_AGG]->{{{pattern_len}}}(s:Subreddit {{name: $name}})
+                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
                 WHERE all(r IN relationships(p) WHERE r.sentiment {op})
-                RETURN p LIMIT 500
+                AND a <> b
+                RETURN p
+                LIMIT 500
             """, name=name)
-        return _timed_match(run, pattern_lengths, subreddit_names)
+        return _timed_per_input(run, subreddit_names)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
