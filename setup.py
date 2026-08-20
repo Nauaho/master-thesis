@@ -6,6 +6,7 @@ from benches.neo4j import Neo4jBenchamrk, wait_neo4j_ready
 from benches.redis import RedisBenchmark, wait_redis_ready
 from benches.chroma import ChromaBenchmark, wait_chroma_ready
 from benches.pgvector import PgVectorBenchmark, wait_pgvector_ready
+from benches.falcordb import FalkorDBBenchmark, wait_falkordb_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -76,6 +77,14 @@ db_specs = [
         volumes={
             str(DATA_DIR): {"bind": "/import", "mode": "ro"}
         },
+    ),
+    DBSpec(
+        image=FALCOR,
+        internal_port=6379,
+        env={},
+        benchmark_cls=FalkorDBBenchmark,
+        wait_ready=wait_falkordb_ready,
+        volumes={str(DATA_DIR): {"bind": "/data/import", "mode": "ro"}},
     ),
     DBSpec(
         image=REDIS,

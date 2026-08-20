@@ -331,6 +331,19 @@ wheels = [
 ]
 
 [[package]]
+name = "falkordb"
+version = "1.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "redis" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/98/d3/799a947869d9b8dd4cfcc6dc9654869874b1130375a78033b5a92362dc67/falkordb-1.7.1.tar.gz", hash = "sha256:09dd89dfb668c6fe7741c0ec67fcdb5c7a4b009e87f065a644199170f4fa5766", size = 121375, upload-time = "2026-08-13T13:17:39.652Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/43/41967fad8b625e2b319e03a1c8897535dd1e05723a051342422b48b870da/falkordb-1.7.1-py3-none-any.whl", hash = "sha256:0e62d535edd5abf7b6d35e2493fba71118734313436ff803fcd5d1b20e9e2194", size = 38283, upload-time = "2026-08-13T13:17:38.257Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.32.3"
 source = { registry = "https://pypi.org/simple" }
@@ -619,6 +632,7 @@ dependencies = [
     { name = "asyncio" },
     { name = "chromadb" },
     { name = "docker" },
+    { name = "falkordb" },
     { name = "neo4j" },
     { name = "numpy" },
     { name = "pgvector" },
@@ -632,6 +646,7 @@ requires-dist = [
     { name = "asyncio", specifier = ">=4.0.0" },
     { name = "chromadb", specifier = ">=1.5.9" },
     { name = "docker", specifier = ">=7.1.0" },
+    { name = "falkordb", specifier = ">=1.7.1" },
     { name = "neo4j", specifier = ">=6.2.0" },
     { name = "numpy", specifier = ">=2.4.5" },
     { name = "pgvector", specifier = ">=0.5.0" },
