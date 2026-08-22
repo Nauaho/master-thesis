@@ -19,7 +19,7 @@ from .base import (
 VECTOR_DIM = 300
 INDEX_NAME = "subreddit_embeddings"
 GRAPH_NAME = "subreddits"
-BATCH_SIZE = 10000
+BATCH_SIZE = 5000
 
 
 class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
@@ -43,25 +43,26 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                     vec = [float(x) for x in raw_vec]
                     if len(vec) != VECTOR_DIM or not any(vec):
                         continue
-                    if any(vec):
-                        batch.append({"name": name, "vec": vec})
+                    batch.append({"name": name, "vec": vec})
+                    
                     if len(batch) >= BATCH_SIZE:
                         self._exec(
                             """
-                                            UNWIND $rows AS row
-                                            MERGE (s:Subreddit {name : row.name })
-                                            SET s.embedding = vecf32(row.vec)
-                                        """,
+                            UNWIND $rows AS row
+                            MERGE (s:Subreddit {name: row.name})
+                            SET s.raw_embedding = row.vec
+                            """,
                             rows=batch,
                         )
+                        batch = []
 
                 if batch:
                     self._exec(
                         """
-                                        UNWIND $rows AS row
-                                        MERGE (s:Subreddit {name : row.name })
-                                        SET s.embedding = vecf32(row.vec)
-                                    """,
+                        UNWIND $rows AS row
+                        MERGE (s:Subreddit {name: row.name})
+                        SET s.raw_embedding = row.vec
+                        """,
                         rows=batch,
                     )
                     batch = []
@@ -92,22 +93,21 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                             }
                             batch.append(row_data)
 
-                        except (ValueError, KeyError) as e:
-                            # Skip or log malformed rows gracefully
+                        except (ValueError, KeyError):
                             continue
 
                         if len(batch) >= BATCH_SIZE:
                             self._exec(
                                 """
                                 UNWIND $rows AS row
-                                MERGE (source:Subreddit {name: row.origin })
-                                MERGE (target:Subreddit {name: row.target })
+                                MERGE (source:Subreddit {name: row.origin})
+                                MERGE (target:Subreddit {name: row.target})
                                 CREATE (source)-[r:LINK_TO {
                                     postId: row.post_id,
                                     timestamp: row.timestamp,
                                     sentimentScore: row.sentiment
                                 }]->(target)
-                            """,
+                                """,
                                 rows=batch,
                             )
                             batch = []
@@ -115,48 +115,49 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                     self._exec(
                         """
                         UNWIND $rows AS row
-                        MERGE (source:Subreddit {name: row.origin })
-                        MERGE (target:Subreddit {name: row.target })
+                        MERGE (source:Subreddit {name: row.origin})
+                        MERGE (target:Subreddit {name: row.target})
                         CREATE (source)-[r:LINK_TO {
                             postId: row.post_id,
                             timestamp: row.timestamp,
                             sentimentScore: row.sentiment
                         }]->(target)
-                    """,
+                        """,
                         rows=batch,
                     )
                     batch = []
+
+            self._exec(
+                """
+                MATCH (s:Subreddit) 
+                WHERE s.raw_embedding IS NOT NULL
+                SET s.embedding = vecf32(s.raw_embedding)
+                REMOVE s.raw_embedding
+                """
+            )
+
         except Exception as e:
             raise BenchmarkImportError(f"FalkorDB import failed: {e}") from e
 
-        node_count = self._exec("MATCH (n:Subreddit) RETURN count(n) AS c").result_set[
-            0
-        ][0]
+        # --- VALIDATION BLOCK ---
+        node_count = self._exec("MATCH (n:Subreddit) RETURN count(n) AS c").result_set[0][0]
         embedded_count = self._exec(
             "MATCH (n:Subreddit) WHERE n.embedding IS NOT NULL RETURN count(n) AS c"
         ).result_set[0][0]
-        edge_count = self._exec(
-            "MATCH ()-[r:LINK_TO]->() RETURN count(r) AS c"
-        ).result_set[0][0]
+        edge_count = self._exec("MATCH ()-[r:LINK_TO]->() RETURN count(r) AS c").result_set[0][0]
 
         errors = []
         if node_count != EXPECTED_NODE_COUNT:
-            errors.append(
-                f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}"
-            )
+            errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
         if embedded_count != EXPECTED_EMBEDDED_NODE_COUNT:
-            errors.append(
-                f"embedded node count: expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}"
-            )
+            errors.append(f"embedded node count: expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}")
         if edge_count != EXPECTED_EDGE_COUNT:
-            errors.append(
-                f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}"
-            )
+            errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
         if errors:
-            raise BenchmarkImportError(
-                "FalkorDB import validation failed:\n" + "\n".join(errors)
-            )
+            raise BenchmarkImportError("FalkorDB import validation failed:\n" + "\n".join(errors))
+            
         return node_count, embedded_count, edge_count
+
 
     def ivf_index_build(self):
         print(f"[{self.db_name}] IVF index build not supported, skipping.")
