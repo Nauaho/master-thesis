@@ -11,7 +11,7 @@ from .base import (
     BenchmarkImportError,
     _timed_index_build,
     _timed_per_input,
-    EXPECTED_EMBEDDED_NODE_COUNT
+    EXPECTED_EMBEDDED_NODE_COUNT,
 )
 
 VECTOR_DIM = 300
@@ -28,6 +28,7 @@ class RedisBenchmark(VectorBenchmarks):
     def import_data(self):
         try:
             import csv
+
             with open("data/web-redditEmbeddings-subreddits.csv") as f:
                 reader = csv.reader(f)
                 pipe = self._r.pipeline(transaction=False)
@@ -36,7 +37,9 @@ class RedisBenchmark(VectorBenchmarks):
                     vec = np.array([float(x) for x in raw_vec], dtype=np.float32)
                     if vec.shape[0] != VECTOR_DIM or not np.any(vec):
                         continue  # skip malformed / zero vectors — same filter as Neo4j
-                    pipe.hset(f"{DOC_PREFIX}{name}", mapping={"embedding": vec.tobytes()})
+                    pipe.hset(
+                        f"{DOC_PREFIX}{name}", mapping={"embedding": vec.tobytes()}
+                    )
                     count += 1
                     if count % 1000 == 0:
                         pipe.execute()
@@ -47,7 +50,9 @@ class RedisBenchmark(VectorBenchmarks):
 
         actual = len(list(self._r.scan_iter(f"{DOC_PREFIX}*")))
         if actual != EXPECTED_EMBEDDED_NODE_COUNT:
-            raise BenchmarkImportError("Redis import validation failed:\n number of embeddings expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}")
+            raise BenchmarkImportError(
+                "Redis import validation failed:\n number of embeddings expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}"
+            )
         return actual
 
     def ivf_index_build(self):
@@ -57,16 +62,28 @@ class RedisBenchmark(VectorBenchmarks):
     def hnsw_index_build(self):
         def build():
             self._r.ft(HNSW_INDEX).create_index(
-                [VectorField("embedding", "HNSW", {
-                    "TYPE": "FLOAT32", "DIM": VECTOR_DIM, "DISTANCE_METRIC": "COSINE",
-                })],
-                definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
+                [
+                    VectorField(
+                        "embedding",
+                        "HNSW",
+                        {
+                            "TYPE": "FLOAT32",
+                            "DIM": VECTOR_DIM,
+                            "DISTANCE_METRIC": "COSINE",
+                        },
+                    )
+                ],
+                definition=IndexDefinition(
+                    prefix=[DOC_PREFIX], index_type=IndexType.HASH
+                ),
             )
+
         def drop():
             try:
                 self._r.ft(HNSW_INDEX).dropindex(delete_documents=False)
             except redis.exceptions.ResponseError:
                 pass
+
         return _timed_index_build(build, n=5, cleanup=drop)
 
     def _flat_index_build(self):
@@ -76,18 +93,32 @@ class RedisBenchmark(VectorBenchmarks):
         except redis.exceptions.ResponseError:
             pass
         self._r.ft(FLAT_INDEX).create_index(
-            [VectorField("embedding", "FLAT", {
-                "TYPE": "FLOAT32", "DIM": VECTOR_DIM, "DISTANCE_METRIC": "COSINE",
-            })],
+            [
+                VectorField(
+                    "embedding",
+                    "FLAT",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": VECTOR_DIM,
+                        "DISTANCE_METRIC": "COSINE",
+                    },
+                )
+            ],
             definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
         )
 
     def knn(self, query_vectors: dict, k: int = 10):
         self._flat_index_build()
+
         def run_query(vec):
             vec_bytes = np.array(vec, dtype=np.float32).tobytes()
-            q = Query(f"*=>[KNN {k} @embedding $vec AS score]").sort_by("score").dialect(2)
+            q = (
+                Query(f"*=>[KNN {k} @embedding $vec AS score]")
+                .sort_by("score")
+                .dialect(2)
+            )
             return self._r.ft(FLAT_INDEX).search(q, query_params={"vec": vec_bytes})
+
         try:
             return _timed_per_input(run_query, inputs=list(query_vectors.values()))
         finally:
@@ -105,15 +136,27 @@ class RedisBenchmark(VectorBenchmarks):
         except redis.exceptions.ResponseError:
             pass
         self._r.ft(HNSW_INDEX).create_index(
-            [VectorField("embedding", "HNSW", {
-                "TYPE": "FLOAT32", "DIM": VECTOR_DIM, "DISTANCE_METRIC": "COSINE",
-            })],
+            [
+                VectorField(
+                    "embedding",
+                    "HNSW",
+                    {
+                        "TYPE": "FLOAT32",
+                        "DIM": VECTOR_DIM,
+                        "DISTANCE_METRIC": "COSINE",
+                    },
+                )
+            ],
             definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
         )
 
         def run_query(vec):
             vec_bytes = np.array(vec, dtype=np.float32).tobytes()
-            q = Query(f"*=>[KNN {k} @embedding $vec AS score]").sort_by("score").dialect(2)
+            q = (
+                Query(f"*=>[KNN {k} @embedding $vec AS score]")
+                .sort_by("score")
+                .dialect(2)
+            )
             return self._r.ft(HNSW_INDEX).search(q, query_params={"vec": vec_bytes})
 
         try:

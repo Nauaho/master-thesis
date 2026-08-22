@@ -22,10 +22,12 @@ GRAPH_QUERY_SUBREDDITS = [
 ]
 LINKS_CATEGORIES = ("positive", "negative")
 
+
 @dataclass
 class BenchMarkResult:
     """For query-style ops where cache state matters — first rep is cold,
     remaining reps are hot (cache-warmed)."""
+
     cold_run: float
     hot_runs: list[float] = field(default_factory=list)
 
@@ -46,7 +48,9 @@ class BenchMarkResult:
 class MatchResult:
     """For match_pattern: k different pattern lengths, each measured n times.
     Keyed by pattern length -> BenchMarkResult for that length."""
+
     by_pattern_length: dict[int, BenchMarkResult]
+
 
 def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
     """Same query run n times identically — cold_run captures cache-miss cost,
@@ -61,6 +65,7 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
+
 def _timed_per_input(func, inputs: list) -> BenchMarkResult:
     """One rep per distinct input — no cold/hot framing, since each rep is a
     genuinely different query/operation, not a repeat of the same one."""
@@ -72,6 +77,7 @@ def _timed_per_input(func, inputs: list) -> BenchMarkResult:
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
+
 def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
     times = []
     for _ in range(n):
@@ -82,6 +88,7 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkR
             cleanup()
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+
 
 def _timed_match(func, pattern_lengths: range, inputs: list[str]) -> MatchResult:
     """func(pattern_length) run n times per pattern length (n x k total calls)."""
@@ -96,11 +103,12 @@ def _timed_match(func, pattern_lengths: range, inputs: list[str]) -> MatchResult
         by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
     return MatchResult(by_pattern_length=by_length)
 
+
 class BenchmarkImportError(Exception):
     """Raised when import_data fails to populate the database."""
 
-class BaseBenchmarks(ABC):
 
+class BaseBenchmarks(ABC):
     def _save(self, metric_name: str, results):
         output_dir = Path("results") / self.db_name
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -123,13 +131,13 @@ class BaseBenchmarks(ABC):
                 f"[{self.db_name}] Unexpected error during import, skipping benchmarks: {e}"
             )
             return
-        
+
         if isinstance(self, GraphBenchmarks):
             self.perform_graph_benchmarks()
-        
+
         if isinstance(self, VectorBenchmarks):
             self.perform_vector_benchmarks()
-        
+
     def __enter__(self):
         return self
 
@@ -145,7 +153,7 @@ class GraphBenchmarks(BaseBenchmarks):
     @abstractmethod
     def common_neighbour_match(self, subreddit_names: list[str]):
         print("Implement the neighbour search")
-    
+
     @abstractmethod
     def cycle_detection(self, subreddit_names: list[str], category: str):
         print("Implement the cycle detection")
@@ -168,31 +176,40 @@ class GraphBenchmarks(BaseBenchmarks):
         self.persist_aggregation()
 
         print(f"[{self.db_name}] Performing common-neighbour match benchmark.")
-        self._save("common_neighbour_match", self.common_neighbour_match(subreddit_names))
+        self._save(
+            "common_neighbour_match", self.common_neighbour_match(subreddit_names)
+        )
 
         for category in ("positive", "negative"):
-            print(f"[{self.db_name}] Performing cycle detection benchmark ({category}).")
-            self._save(f"cycle_{category}", self.cycle_detection(subreddit_names, category))
+            print(
+                f"[{self.db_name}] Performing cycle detection benchmark ({category})."
+            )
+            self._save(
+                f"cycle_{category}", self.cycle_detection(subreddit_names, category)
+            )
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 
 
 class VectorBenchmarks(BaseBenchmarks):
-
     @cached_property
     def query_vectors_knn(self) -> dict[str, list[float]]:
         vectors = self._load_query_vectors("sample/input_vectors_1.csv")
         for name, vec in vectors.items():
             assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
-            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+            assert all(isinstance(x, float) for x in vec), (
+                f"{name}: non-float element found"
+            )
         return vectors
-    
+
     @cached_property
     def query_vectors_ann_hnsw(self) -> dict[str, list[float]]:
         vectors = self._load_query_vectors("sample/input_vectors_2.csv")
         for name, vec in vectors.items():
             assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
-            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+            assert all(isinstance(x, float) for x in vec), (
+                f"{name}: non-float element found"
+            )
         return vectors
 
     @cached_property
@@ -200,7 +217,9 @@ class VectorBenchmarks(BaseBenchmarks):
         vectors = self._load_query_vectors("sample/input_vectors_3.csv")
         for name, vec in vectors.items():
             assert len(vec) == 300, f"{name}: expected 300 dims, got {len(vec)}"
-            assert all(isinstance(x, float) for x in vec), f"{name}: non-float element found"
+            assert all(isinstance(x, float) for x in vec), (
+                f"{name}: non-float element found"
+            )
         return vectors
 
     @staticmethod
@@ -232,8 +251,18 @@ class VectorBenchmarks(BaseBenchmarks):
         for metric_name, metric, method, kwargs in [
             ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
             ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
-            ("ANN Search on HNSW Index", "ann_hnsw", self.ann, {"index_type": "hnsw", "query_vectors": self.query_vectors_ann_hnsw}),
-            ("ANN Search on IVF Index", "ann_ivf", self.ann, {"index_type": "ivf", "query_vectors": self.query_vectors_ann_ivf}),
+            (
+                "ANN Search on HNSW Index",
+                "ann_hnsw",
+                self.ann,
+                {"index_type": "hnsw", "query_vectors": self.query_vectors_ann_hnsw},
+            ),
+            (
+                "ANN Search on IVF Index",
+                "ann_ivf",
+                self.ann,
+                {"index_type": "ivf", "query_vectors": self.query_vectors_ann_ivf},
+            ),
             ("KNN Search", "knn", self.knn, {"query_vectors": self.query_vectors_knn}),
         ]:
             print(f"[{self.db_name}] Benchmarking {metric_name}.")

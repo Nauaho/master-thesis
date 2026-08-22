@@ -6,7 +6,7 @@ from .base import (
     _timed_per_input,
     VectorBenchmarks,
     BenchmarkImportError,
-    EXPECTED_EMBEDDED_NODE_COUNT
+    EXPECTED_EMBEDDED_NODE_COUNT,
 )
 
 VECTOR_DIM = 300
@@ -26,8 +26,8 @@ class ChromaBenchmark(VectorBenchmarks):
                 configuration={
                     "hnsw": {
                         "space": "cosine",
-                        "batch_size": 100,       # frequent migration into real HNSW graph
-                        "sync_threshold": 100,    # frequent disk flush, same as batch_size
+                        "batch_size": 100,  # frequent migration into real HNSW graph
+                        "sync_threshold": 100,  # frequent disk flush, same as batch_size
                     }
                 },
             )
@@ -60,8 +60,10 @@ class ChromaBenchmark(VectorBenchmarks):
         return count
 
     def hnsw_index_build(self):
-        print(f"[{self.db_name}] HNSW build not independently controllable "
-              f"(background compaction, not a client-triggered op) — skipping.")
+        print(
+            f"[{self.db_name}] HNSW build not independently controllable "
+            f"(background compaction, not a client-triggered op) — skipping."
+        )
         return None
 
     def ivf_index_build(self):
@@ -69,13 +71,17 @@ class ChromaBenchmark(VectorBenchmarks):
         return None
 
     def knn(self, query_vectors: dict, k: int = 10):
-        print(f"[{self.db_name}] No exact/brute-force search mode available "
-              f"(HNSW-only) — skipping KNN.")
+        print(
+            f"[{self.db_name}] No exact/brute-force search mode available "
+            f"(HNSW-only) — skipping KNN."
+        )
         return None
 
     def ann(self, index_type: str, query_vectors: dict, k: int = 10):
         if index_type != "hnsw":
-            print(f"[{self.db_name}] Only HNSW is supported (no IVF) — skipping {index_type}.")
+            print(
+                f"[{self.db_name}] Only HNSW is supported (no IVF) — skipping {index_type}."
+            )
             return None
 
         def run(vec: list[float]):
@@ -99,6 +105,7 @@ class ChromaBenchmark(VectorBenchmarks):
                 return
             time.sleep(0.5)
         raise TimeoutError(f"Chroma did not finish indexing within {timeout}s")
+
 
 def wait_chroma_ready(port: int, timeout: int = 60):
     deadline = time.time() + timeout

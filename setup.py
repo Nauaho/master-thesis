@@ -62,57 +62,66 @@ class DBSpec:
 
 
 db_specs = [
-    DBSpec(
-        image=NEO4J,
-        internal_port=7687,
-        env={
-            "NEO4J_AUTH": "neo4j/password",
-            "NEO4J_dbms_directories_import": "/import",
-            "NEO4J_server_memory_heap_initial__size": "5g",
-            "NEO4J_server_memory_heap_max__size": "5g",
-            "NEO4J_server_memory_pagecache_size": "7g"
-        },
-        benchmark_cls=Neo4jBenchamrk,
-        wait_ready=wait_neo4j_ready,
-        volumes={
-            str(DATA_DIR): {"bind": "/import", "mode": "ro"}
-        },
-    ),
+    # DBSpec(
+    #     image=NEO4J,
+    #     internal_port=7687,
+    #     env={
+    #         "NEO4J_AUTH": "neo4j/password",
+    #         "NEO4J_dbms_directories_import": "/import",
+    #         "NEO4J_server_memory_heap_initial__size": "5g",
+    #         "NEO4J_server_memory_heap_max__size": "5g",
+    #         "NEO4J_server_memory_pagecache_size": "7g"
+    #     },
+    #     benchmark_cls=Neo4jBenchamrk,
+    #     wait_ready=wait_neo4j_ready,
+    #     volumes={
+    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"}
+    #     },
+    # ),
+    # DBSpec(
+    #     image=FALCOR,
+    #     internal_port=6379,
+    #     env={},
+    #     benchmark_cls=FalkorDBBenchmark,
+    #     wait_ready=wait_falkordb_ready,
+    #     volumes={str(DATA_DIR): {"bind": "/data/import", "mode": "ro"}},
+    # ),
+    # DBSpec(
+    #     image=REDIS,
+    #     internal_port=6379,
+    #     env={},
+    #     benchmark_cls=RedisBenchmark,
+    #     wait_ready=wait_redis_ready,
+    #     volumes=None,
+    #     command=["redis-server", "--maxmemory", "14gb"]
+    # ),
+    # DBSpec(
+    #     image=CHROMA,
+    #     internal_port=8000,
+    #     env={"IS_PERSISTENT": "TRUE"},
+    #     benchmark_cls=ChromaBenchmark,
+    #     wait_ready=wait_chroma_ready,
+    #     volumes=None,
+    # ),
+    # DBSpec(
+    #     image=PGVECTOR,
+    #     internal_port=5432,
+    #     env={"POSTGRES_PASSWORD": "password"},
+    #     benchmark_cls=PgVectorBenchmark,
+    #     wait_ready=wait_pgvector_ready,
+    #     volumes={
+    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+    #     },
+    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+    #     ),
     DBSpec(
         image=FALCOR,
         internal_port=6379,
         env={},
         benchmark_cls=FalkorDBBenchmark,
         wait_ready=wait_falkordb_ready,
-        volumes={str(DATA_DIR): {"bind": "/data/import", "mode": "ro"}},
-    ),
-    DBSpec(
-        image=REDIS,
-        internal_port=6379,
-        env={},
-        benchmark_cls=RedisBenchmark,
-        wait_ready=wait_redis_ready,
-        volumes=None,
-        command=["redis-server", "--maxmemory", "14gb"]
-    ),
-    DBSpec(
-        image=CHROMA,
-        internal_port=8000,
-        env={"IS_PERSISTENT": "TRUE"},
-        benchmark_cls=ChromaBenchmark,
-        wait_ready=wait_chroma_ready,
-        volumes=None,
-    ),
-    DBSpec(
-        image=PGVECTOR,
-        internal_port=5432,
-        env={"POSTGRES_PASSWORD": "password"},
-        benchmark_cls=PgVectorBenchmark,
-        wait_ready=wait_pgvector_ready,
-        volumes={
-            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-        },
-        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+        command=["--maxmemory", "14gb"],
     )
 ]
 
@@ -129,7 +138,7 @@ def run_all_benchmarks():
             detach=True,
             nano_cpus=CPU_QUOTA,
             mem_limit=MEM_QUOTA,
-            command=spec.command
+            command=spec.command,
         )
         container.reload()  # ensure attrs reflect the assigned port
         port_info = container.attrs["NetworkSettings"]["Ports"][
