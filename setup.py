@@ -117,11 +117,11 @@ db_specs = [
     DBSpec(
         image=FALCOR,
         internal_port=6379,
-        env={},
+        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
         benchmark_cls=FalkorDBBenchmark,
         wait_ready=wait_falkordb_ready,
         volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-        command=["--maxmemory", "14gb"],
+        command=["redis-server", "--maxmemory", "14gb"],
     )
 ]
 

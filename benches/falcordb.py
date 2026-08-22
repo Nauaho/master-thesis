@@ -44,7 +44,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                     if len(vec) != VECTOR_DIM or not any(vec):
                         continue
                     batch.append({"name": name, "vec": vec})
-                    
+
                     if len(batch) >= BATCH_SIZE:
                         self._exec(
                             """
@@ -93,7 +93,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                             }
                             batch.append(row_data)
 
-                        except (ValueError, KeyError):
+                        except ValueError, KeyError:
                             continue
 
                         if len(batch) >= BATCH_SIZE:
@@ -140,24 +140,35 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             raise BenchmarkImportError(f"FalkorDB import failed: {e}") from e
 
         # --- VALIDATION BLOCK ---
-        node_count = self._exec("MATCH (n:Subreddit) RETURN count(n) AS c").result_set[0][0]
+        node_count = self._exec("MATCH (n:Subreddit) RETURN count(n) AS c").result_set[
+            0
+        ][0]
         embedded_count = self._exec(
             "MATCH (n:Subreddit) WHERE n.embedding IS NOT NULL RETURN count(n) AS c"
         ).result_set[0][0]
-        edge_count = self._exec("MATCH ()-[r:LINK_TO]->() RETURN count(r) AS c").result_set[0][0]
+        edge_count = self._exec(
+            "MATCH ()-[r:LINK_TO]->() RETURN count(r) AS c"
+        ).result_set[0][0]
 
         errors = []
         if node_count != EXPECTED_NODE_COUNT:
-            errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
+            errors.append(
+                f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}"
+            )
         if embedded_count != EXPECTED_EMBEDDED_NODE_COUNT:
-            errors.append(f"embedded node count: expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}")
+            errors.append(
+                f"embedded node count: expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}"
+            )
         if edge_count != EXPECTED_EDGE_COUNT:
-            errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
+            errors.append(
+                f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}"
+            )
         if errors:
-            raise BenchmarkImportError("FalkorDB import validation failed:\n" + "\n".join(errors))
-            
-        return node_count, embedded_count, edge_count
+            raise BenchmarkImportError(
+                "FalkorDB import validation failed:\n" + "\n".join(errors)
+            )
 
+        return node_count, embedded_count, edge_count
 
     def ivf_index_build(self):
         print(f"[{self.db_name}] IVF index build not supported, skipping.")
@@ -180,7 +191,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             return self._exec(
                 """
                 MATCH (s:Subreddit) WHERE s.embedding IS NOT NULL
-                WITH s, vector.similarity.cosine(s.embedding, vecf32($queryVector)) AS score
+                WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
                 RETURN s.name, score ORDER BY score DESC LIMIT $k
             """,
                 queryVector=vec,
@@ -201,15 +212,14 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             OPTIONS {{dimension: {VECTOR_DIM}, similarityFunction: 'cosine'}}
         """)
 
-        def run_query(vec):
-            return self._exec(
-                """
-                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', $k, vecf32($queryVector))
+        def run_query(vec: list[float]):
+            return self._exec("""
+                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', $k, $queryVector)
                 YIELD node, score
                 RETURN node.name, score
             """,
                 queryVector=vec,
-                k=k,
+                k=int(k),
             )
 
         try:
@@ -250,11 +260,12 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 """
                 MATCH (s:Subreddit {name: $name})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
                 WHERE r1.sentiment > 0.5 AND r2.sentiment > 0.5
-                  AND s <> newFriend
-                  AND NOT EXISTS { (s)-[:LINK_TO_AGG]->(newFriend) }
-                  AND NOT EXISTS { (newFriend)-[:LINK_TO_AGG]->(s) }
+                    AND s <> newFriend
+                    AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
+                    AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
                 RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
-                ORDER BY delta_interest DESC LIMIT 100
+                ORDER BY delta_interest DESC
+                LIMIT 100
             """,
                 name=name,
             )

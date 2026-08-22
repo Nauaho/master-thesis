@@ -57,9 +57,9 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
     hot_runs capture cache-warmed performance."""
     times = []
     for _ in range(n):
-        start = time.time()
+        start = time.perf_counter()
         func()
-        times.append(time.time() - start)
+        times.append(time.perf_counter() - start)
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
@@ -71,9 +71,9 @@ def _timed_per_input(func, inputs: list) -> BenchMarkResult:
     genuinely different query/operation, not a repeat of the same one."""
     times = []
     for item in inputs:
-        start = time.time()
+        start = time.perf_counter()
         func(item)
-        times.append(time.time() - start)
+        times.append(time.perf_counter() - start)
     cold_run, *hot_runs = times
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
@@ -81,9 +81,9 @@ def _timed_per_input(func, inputs: list) -> BenchMarkResult:
 def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
     times = []
     for _ in range(n):
-        start = time.time()
+        start = time.perf_counter()
         func()
-        times.append(time.time() - start)
+        times.append(time.perf_counter() - start)
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
@@ -96,9 +96,9 @@ def _timed_match(func, pattern_lengths: range, inputs: list[str]) -> MatchResult
     for k in pattern_lengths:
         times = []
         for item in inputs:
-            start = time.time()
+            start = time.perf_counter()
             func(k, item)
-            times.append(time.time() - start)
+            times.append(time.perf_counter() - start)
         cold_run, *hot_runs = times
         by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
     return MatchResult(by_pattern_length=by_length)
@@ -249,8 +249,8 @@ class VectorBenchmarks(BaseBenchmarks):
 
     def perform_vector_benchmarks(self):
         for metric_name, metric, method, kwargs in [
-            ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
-            ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
+            # ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
+            # ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
             (
                 "ANN Search on HNSW Index",
                 "ann_hnsw",
