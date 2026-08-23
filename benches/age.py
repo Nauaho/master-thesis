@@ -15,6 +15,8 @@ import subprocess
 
 GRAPH_NAME = "subreddits"
 
+# Initialize connection string
+dsn = "postgresql://username:password@localhost:5432/dbname"
 
 class AGEBenchmark(GraphBenchmarks):
     def __init__(self, port: int):

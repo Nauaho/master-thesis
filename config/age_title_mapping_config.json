@@ -1,17 +1,17 @@
 {
   "edge": {
-    "csv_path": "./data/soc-redditHyperlinks-title.csv",
-    "type": "LINKED",
-    "props": ["POST_ID", "TIMESTAMP", "LINK_SENTIMENT", "PROPERTIES"],
+    "csv_path": "./data/age_title.csv",
+    "type": "LINK_TO",
+    "props": ["postId", "timestamp", "sentimentScore"],
     "start_vertex": {
-      "csv_path": "./data/soc-redditHyperlinks-title.csv",
-      "id": "SOURCE_SUBREDDIT",
+      "csv_path": "./data/age_body.csv",
+      "id": "start_id",
       "label": "Subreddit",
       "props": []
     },
     "end_vertex": {
-      "csv_path": "./data/soc-redditHyperlinks-title.csv",
-      "id": "TARGET_SUBREDDIT",
+      "csv_path": "./data/age_body.csv",
+      "id": "end_id",
       "label": "Subreddit",
       "props": []
     }
