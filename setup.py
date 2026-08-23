@@ -8,6 +8,7 @@ from benches.chroma import ChromaBenchmark, wait_chroma_ready
 from benches.pgvector import PgVectorBenchmark, wait_pgvector_ready
 from benches.falcordb import FalkorDBBenchmark, wait_falkordb_ready
 from benches.age import AGEBenchmark, wait_age_ready
+from benches.pure_pg import PostgresGraphBenchmark, wait_postgres_sql_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -140,7 +141,27 @@ db_specs = [
         ],
         benchmark_cls=AGEBenchmark,
         wait_ready=wait_age_ready,
-    )
+    ),
+    DBSpec(
+        image=POSTGRES,
+        internal_port=5432,
+        env={"POSTGRES_PASSWORD": "password"},
+        volumes={
+            str(DATA_DIR): {"bind": "/import", "mode": "ro"},
+            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+        },
+        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+        benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
+        wait_ready=wait_postgres_sql_ready,
+    ),
+    # DBSpec(
+    #     image=MONGO,
+    #     internal_port=27017,
+    #     env={},
+    #     benchmark_cls=MongoBenchmark,
+    #     wait_ready=wait_mongo_ready,
+    #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
+    # )
 ]
 
 
