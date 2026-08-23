@@ -7,6 +7,7 @@ from benches.redis import RedisBenchmark, wait_redis_ready
 from benches.chroma import ChromaBenchmark, wait_chroma_ready
 from benches.pgvector import PgVectorBenchmark, wait_pgvector_ready
 from benches.falcordb import FalkorDBBenchmark, wait_falkordb_ready
+from benches.age import AGEBenchmark, wait_age_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -114,14 +115,31 @@ db_specs = [
     #     },
     #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     #     ),
+    # DBSpec(
+    #     image=FALCOR,
+    #     internal_port=6379,
+    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+    #     benchmark_cls=FalkorDBBenchmark,
+    #     wait_ready=wait_falkordb_ready,
+    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+    #     command=["redis-server", "--maxmemory", "14gb"],
+    # ),
     DBSpec(
-        image=FALCOR,
-        internal_port=6379,
-        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-        benchmark_cls=FalkorDBBenchmark,
-        wait_ready=wait_falkordb_ready,
-        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-        command=["redis-server", "--maxmemory", "14gb"],
+        image=AGE,
+        internal_port=5432,
+        env={"POSTGRES_PASSWORD": "password"},
+        volumes={
+            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+        },
+        command=[
+            "postgres",
+            "-c",
+            "config_file=/etc/postgresql/postgresql.conf",
+            "-c",
+            "shared_preload_libraries=age",
+        ],
+        benchmark_cls=AGEBenchmark,
+        wait_ready=wait_age_ready,
     )
 ]
 
@@ -169,5 +187,5 @@ def run_all_benchmarks():
                 bench.perform_benchmark()
         finally:
             print("Check container")
-            container.stop()
-            container.remove(v=True)
+            # container.stop()
+            # container.remove(v=True)

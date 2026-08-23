@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "agefreighter>=1.0.33",
     "asyncio>=4.0.0",
     "chromadb>=1.5.9",
     "docker>=7.1.0",

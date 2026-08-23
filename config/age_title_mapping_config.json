@@ -1,0 +1,19 @@
+{
+  "edge": {
+    "csv_path": "./data/soc-redditHyperlinks-title.csv",
+    "type": "LINKED",
+    "props": ["POST_ID", "TIMESTAMP", "LINK_SENTIMENT", "PROPERTIES"],
+    "start_vertex": {
+      "csv_path": "./data/soc-redditHyperlinks-title.csv",
+      "id": "SOURCE_SUBREDDIT",
+      "label": "Subreddit",
+      "props": []
+    },
+    "end_vertex": {
+      "csv_path": "./data/soc-redditHyperlinks-title.csv",
+      "id": "TARGET_SUBREDDIT",
+      "label": "Subreddit",
+      "props": []
+    }
+  }
+}

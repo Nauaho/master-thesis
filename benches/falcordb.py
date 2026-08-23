@@ -213,7 +213,8 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         """)
 
         def run_query(vec: list[float]):
-            return self._exec("""
+            return self._exec(
+                """
                 CALL db.idx.vector.queryNodes('Subreddit', 'embedding', $k, $queryVector)
                 YIELD node, score
                 RETURN node.name, score
