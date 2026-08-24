@@ -6,7 +6,7 @@ from .base import (
     BenchmarkImportError,
     _timed_repeated,
     _timed_per_input,
-    EXPECTED_NODE_COUNT,
+    EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
 )
@@ -71,14 +71,26 @@ class AGEBenchmark(GraphBenchmarks):
                         print(f"  Edge count now: {edge_count}")
                         if index_is_not:
                             self._conn.execute(f"""
-                                            CREATE INDEX idx_labelname_name_btree ON {GRAPH_NAME}."subreddits" 
-                                            USING btree (agtype_access_operator(VARIADIC ARRAY[properties, '"name"'::agtype]));
-                                        """)
+                                CREATE INDEX idx_labelname_name_btree ON {GRAPH_NAME}."subreddits" 
+                                USING btree (agtype_access_operator(VARIADIC ARRAY[properties, '"name"'::agtype]));
+                            """)
+                            self._conn.execute(f"""
+                                CREATE INDEX ON {GRAPH_NAME}."Subreddit" USING BTREE (id);
+                                CREATE INDEX ON {GRAPH_NAME}."Subreddit" USING GIN (properties);
+                            """)
+                            self._conn.execute(f"""
+                                CREATE INDEX ON {GRAPH_NAME}."LINK_TO" USING BTREE (id);
+                                CREATE INDEX ON {GRAPH_NAME}."LINK_TO" USING GIN (properties);
+                            """)
+                            self._conn.execute(f"""
+                                CREATE INDEX ON {GRAPH_NAME}."LINK_TO" USING BTREE (start_id);
+                                CREATE INDEX ON {GRAPH_NAME}."LINK_TO" USING BTREE (end_id);
+                            """)
                             index_is_not = False
                             
-                    self._conn.execute(f"""ANALYZE {GRAPH_NAME}.Subreddits""")
+                    self._conn.execute(f"""ANALYZE {GRAPH_NAME}."Subreddit";""")
 
-            self._conn.execute(f"""ANALYZE {GRAPH_NAME}.Subreddits""")
+            self._conn.execute(f"""ANALYZE {GRAPH_NAME}."Subreddit";""")
         except Exception as e:
             raise BenchmarkImportError(f"AGE import failed: {e}") from e
 
@@ -86,8 +98,8 @@ class AGEBenchmark(GraphBenchmarks):
         edge_count = self._exec("MATCH ()-[r:LINK_TO]->() RETURN count(r)")[0][0]
 
         errors = []
-        if node_count != EXPECTED_NODE_COUNT:
-            errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
+        if node_count != EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET:
+            errors.append(f"node count: expected {EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET}, got {node_count}")
         if edge_count != EXPECTED_EDGE_COUNT:
             errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
         if errors:
@@ -143,7 +155,7 @@ class AGEBenchmark(GraphBenchmarks):
         def run(name: str):
             return self._exec(f"""
                 MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
-                WHERE r1.sentiment > 0.5 AND r2.sentiment > 0.5
+                WHERE r1.sentiment >  0.33 AND r2.sentiment > 0.33
                   AND s <> newFriend
                   AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
                   AND NOT (newFriend)-[:LINK_TO_AGG]->(s)

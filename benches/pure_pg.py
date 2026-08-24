@@ -2,16 +2,15 @@
 import time
 import csv
 import psycopg
-from base import (
+from .base import (
     GraphBenchmarks,
     BenchmarkImportError,
     _timed_repeated,
     _timed_per_input,
-    EXPECTED_NODE_COUNT,
+    EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
 )
-
 
 class PostgresGraphBenchmark(GraphBenchmarks):
     def __init__(self, port: int):
@@ -30,7 +29,8 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                     target_subreddit TEXT NOT NULL,
                     post_id TEXT,
                     ts TIMESTAMP,
-                    sentiment_score REAL
+                    sentiment_score REAL,
+                    properties REAL[]
                 )
             """)
 
@@ -48,26 +48,25 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                                     row["POST_ID"],
                                     row["TIMESTAMP"],
                                     float(row["LINK_SENTIMENT"]),
+                                    [float(num) for num in row["PROPERTIES".split(",")]]
                                 ))
 
-            # bulk-then-index, same reasoning as AGE
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_link_source ON link_to (source_subreddit)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_link_target ON link_to (target_subreddit)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_link_group ON link_to (source_subreddit, target_subreddit)")
+            self._conn.execute("ANALYZE link_to;")
+            self._conn.execute("ANALYZE subreddit;")
         except Exception as e:
             raise BenchmarkImportError(f"Postgres (SQL) import failed: {e}") from e
 
         node_count = self._conn.execute("""
-            SELECT count(*) FROM (
-                SELECT source_subreddit AS name FROM link_to
-                UNION
-                SELECT target_subreddit FROM link_to
-            ) AS names
+            SELECT count(*) FROM subreddit;
         """).fetchone()[0]
         edge_count = self._conn.execute("SELECT count(*) FROM link_to").fetchone()[0]
 
         errors = []
-        if node_count != EXPECTED_NODE_COUNT:
-            errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
+        if node_count != EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET:
+            errors.append(f"node count: expected {EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET}, got {node_count}")
         if edge_count != EXPECTED_EDGE_COUNT:
             errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
         if errors:
@@ -110,7 +109,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                 FROM link_to_agg r1
                 JOIN link_to_agg r2 ON r1.target_subreddit = r2.target_subreddit
                 WHERE r1.source_subreddit = %s
-                  AND r1.sentiment > 0.5 AND r2.sentiment > 0.5
+                  AND r1.sentiment > 0.33 AND r2.sentiment > 0.33
                   AND r2.source_subreddit <> r1.source_subreddit
                   AND NOT EXISTS (
                       SELECT 1 FROM link_to_agg x
