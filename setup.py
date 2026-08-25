@@ -142,18 +142,18 @@ db_specs = [
         benchmark_cls=AGEBenchmark,
         wait_ready=wait_age_ready,
     ),
-    DBSpec(
-        image=POSTGRES,
-        internal_port=5432,
-        env={"POSTGRES_PASSWORD": "password"},
-        volumes={
-            str(DATA_DIR): {"bind": "/import", "mode": "ro"},
-            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-        },
-        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
-        benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
-        wait_ready=wait_postgres_sql_ready,
-    ),
+    # DBSpec(
+    #     image=POSTGRES,
+    #     internal_port=5432,
+    #     env={"POSTGRES_PASSWORD": "password"},
+    #     volumes={
+    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"},
+    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+    #     },
+    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+    #     benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
+    #     wait_ready=wait_postgres_sql_ready,
+    # ),
     # DBSpec(
     #     image=MONGO,
     #     internal_port=27017,

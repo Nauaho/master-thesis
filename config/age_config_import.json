@@ -1,0 +1,19 @@
+{
+  "edge": {
+    "csv_path": "data/reddit_agefreighter/links.csv",
+    "type": "LINK_TO",
+    "props": ["sentimentScore"],
+    "start_vertex": {
+      "csv_path": "data/reddit_agefreighter/subreddits.csv",
+      "id": "id",
+      "label": "Subreddit",
+      "props": ["name"]
+    },
+    "end_vertex": {
+      "csv_path": "data/reddit_agefreighter/subreddits.csv",
+      "id": "id",
+      "label": "Subreddit",
+      "props": ["name"]
+    }
+  }
+}
