@@ -13,9 +13,11 @@ from .base import (
     BenchmarkImportError,
     _timed_repeated,
     _timed_per_input,
+    _timed_match,
     EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    TRAVERSAL_LIMIT
 )
 
 
@@ -368,12 +370,6 @@ class AGEBenchmark(GraphBenchmarks):
         """
         Create indexes after bulk loading.
         """
-        print("Converting imported values to the proper types")
-        self._exec(
-        """
-        MATCH ()-[r:LINK_TO]->()
-        SET r.sentimentScore = toFloat(r.sentimentScore)        
-        """)
 
         print("Creating indexes...")
 
@@ -447,6 +443,21 @@ class AGEBenchmark(GraphBenchmarks):
                 idx_link_to_end_id
             ON {GRAPH_NAME}."LINK_TO"
             USING BTREE (end_id);
+            """
+        )
+
+        self._conn.execute(
+            f"""
+            CREATE INDEX idf_float_mapping_of_sentiment 
+            ON {GRAPH_NAME}."LINK_TO"
+            USING btree (
+                (ag_catalog.agtype_to_float8(
+                    ag_catalog.agtype_access_operator(
+                        VARIADIC ARRAY[properties, '"sentimentScore"'::ag_catalog.agtype]
+                        )
+                    )
+                )
+            );
             """
         )
 
@@ -537,7 +548,6 @@ class AGEBenchmark(GraphBenchmarks):
                 ↓
             final validation
         """
-
         try:
             print("=== AGE Reddit import ===")
 
@@ -605,35 +615,73 @@ class AGEBenchmark(GraphBenchmarks):
         self._exec(
             """
             MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
-            WITH s, t, avg(r.sentimentScore) AS sentiment, count(r) AS linkCount
-            MERGE (s)-[agg:LINK_TO_AGG]->(t)
+            WITH s, t, avg(toFloat(r.sentimentScore)) AS avgSentiment, count(r) AS linkCount
+            CREATE (s)-[agg:LINK_TO_AGG]->(t)
             SET
-                agg.sentiment = sentiment,
+                agg.sentiment = avgSentiment,
                 agg.linkCount = linkCount
             """
         )
 
-        self._exec(
+        self._conn.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS
+                        idx_link_to_id
+                    ON {GRAPH_NAME}."LINK_TO_AGG"
+                    USING BTREE (id);
+                    """
+        )
+        
+        self._conn.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS
+                        idx_link_to_properties
+                    ON {GRAPH_NAME}."LINK_TO_AGG"
+                    USING GIN (properties);
+                    """
+        )
+        
+        self._conn.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS
+                        idx_link_to_start_id
+                    ON {GRAPH_NAME}."LINK_TO_AGG"
+                    USING BTREE (start_id);
+                    """
+                )
+        
+        self._conn.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS
+                        idx_link_to_end_id
+                    ON {GRAPH_NAME}."LINK_TO_AGG"
+                    USING BTREE (end_id);
+                    """
+                )
+
+        self._conn.execute(
             f"""
-            CREATE IF NOT EXISTS INDEX idx_link_agg_sentimentScore
-            ON {GRAPH_NAME}."LINK_TO"
+            CREATE INDEX idx_link_agg_sentimentScore
+            ON {GRAPH_NAME}."LINK_TO_AGG"
             USING btree (
                 agtype_access_operator(
                     VARIADIC ARRAY[
                         properties,
-                        '"sentimentScore"'::agtype
+                        '"sentiment"'::agtype
                     ]
                 )
             );
             """
         )
 
-        edge_agg_count = self._exec(
+        self._conn.execute(f'ANALYZE {GRAPH_NAME}."LINK_TO_AGG";')
+
+        edge_agg_count = int(self._exec(
             """
             MATCH ()-[r:LINK_TO_AGG]->()
             RETURN count(r)
             """
-        )[0][0]
+        )[0][0])
 
         if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
             raise BenchmarkImportError(
@@ -647,7 +695,7 @@ class AGEBenchmark(GraphBenchmarks):
     # ------------------------------------------------------------------
 
     def aggregate_graph(self):
-
+        print("yes")
         def run():
             return self._exec(
                 """
@@ -655,9 +703,9 @@ class AGEBenchmark(GraphBenchmarks):
                 RETURN
                     s.name,
                     t.name,
-                    sum(r.sentimentScore),
+                    sum(toFloat(r.sentimentScore)) AS sumSentiment,
                     count(r)
-                ORDER BY sum(r.sentimentScore) DESC
+                ORDER BY sumSentiment DESC
                 """,
                 out_cols=(
                     "source agtype, "
@@ -683,13 +731,13 @@ class AGEBenchmark(GraphBenchmarks):
                 f"""
                 MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
                 WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
-                    AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
-                    AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
+                    AND NOT (s)-[LINK_TO_AGG]->(newFriend)
+                    AND NOT (newFriend)-[LINK_TO_AGG]->(s)
                 RETURN newFriend.name, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY
                     delta_interest DESC
 
-                LIMIT 100
+                LIMIT 500
                 """,
                 out_cols=(
                     "newFriend agtype, "
@@ -707,25 +755,46 @@ class AGEBenchmark(GraphBenchmarks):
         subreddit_names: list[str],
         category: str = "positive",
     ):
-
         op = self._sentiment_op(category)
 
-        def run(name: str):
-
-            return self._exec(
-                f"""
-                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
-                WHERE all(r IN relationships(p) WHERE r.sentiment {op}) AND a <> b
-                RETURN p
-                LIMIT 500
-                """,
-                out_cols="p agtype",
-            )
-
+        if(category == "positive"):
+            def run(name: str):
+                return self._exec(
+                    f"""
+                    MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
+                    WHERE min(r.sentiment IN relationships(p)) {op} AND a <> b
+                    RETURN p
+                    LIMIT 500
+                    """,
+                    out_cols="p agtype",
+                )
+        else:
+            def run(name: str):
+                return self._exec(
+                    f"""
+                    MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
+                    WHERE max(r.sentiment IN relationships(p)) {op} AND a <> b
+                    RETURN p
+                    LIMIT 500
+                    """,
+                    out_cols="p agtype",
+                )
         return _timed_per_input(
             run,
             subreddit_names,
         )
+
+    def friends_of_friends(self, subreddit_names: list[str]):
+        def run(name: str, pattern_length: int):
+            return self._exec(f"""
+                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AG*{pattern_length}]->(friend:Subreddit)
+                WHERE min(r.sentiment IN relationships(p)) > 0.33 AND count(DISTINCT nodes(p)) = {pattern_length}
+                RETURN p
+                LIMIT {TRAVERSAL_LIMIT}
+                """,
+                out_cols="p agtype",
+            )
+        return _timed_match(run, subreddit_names)
 
     # ------------------------------------------------------------------
     # Context manager

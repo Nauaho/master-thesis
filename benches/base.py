@@ -14,6 +14,7 @@ EXPECTED_EDGE_AGG_COUNT = 339_643
 EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET = 67_180
 
 MATCH_AGG_MAX = 5
+TRAVERSAL_LIMIT = 500
 GRAPH_QUERY_SUBREDDITS = [
     "shitamericanssay",
     "botsrights",
@@ -91,14 +92,16 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkR
     return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
 
 
-def _timed_match(func, pattern_lengths: range, inputs: list[str]) -> MatchResult:
+def _timed_match(func, inputs: list[str], max_range = MATCH_AGG_MAX) -> MatchResult:
     """func(pattern_length) run n times per pattern length (n x k total calls)."""
     by_length = {}
-    for k in pattern_lengths:
+    if(max_range < 2):
+        return MatchResult()
+    for k in range(1,max_range + 1):
         times = []
         for item in inputs:
             start = time.perf_counter()
-            func(k, item)
+            func(item, k)
             times.append(time.perf_counter() - start)
         cold_run, *hot_runs = times
         by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
@@ -159,6 +162,10 @@ class GraphBenchmarks(BaseBenchmarks):
     def cycle_detection(self, subreddit_names: list[str], category: str):
         print("Implement the cycle detection")
 
+    @abstractmethod
+    def friends_of_friends(self, subreddit_name: list[str]):
+        print("Implement max 5 hop traversal")
+
     @staticmethod
     def _sentiment_op(category: str) -> str:
         if category == "positive":
@@ -188,6 +195,11 @@ class GraphBenchmarks(BaseBenchmarks):
             self._save(
                 f"cycle_{category}", self.cycle_detection(subreddit_names, category)
             )
+
+        print(f"[{self.db_name}] Performing common-neighbour match benchmark.")
+        self._save(
+            "friends_of_friends", self.friends_of_friends(subreddit_names)
+        )
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 
@@ -250,8 +262,8 @@ class VectorBenchmarks(BaseBenchmarks):
 
     def perform_vector_benchmarks(self):
         for metric_name, metric, method, kwargs in [
-            # ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
-            # ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
+            ("HNSW Index Build Time", "hnsw_index_build", self.hnsw_index_build, {}),
+            ("IVF Index Build Time", "ivf_index_build", self.ivf_index_build, {}),
             (
                 "ANN Search on HNSW Index",
                 "ann_hnsw",

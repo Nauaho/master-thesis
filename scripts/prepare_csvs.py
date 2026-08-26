@@ -31,8 +31,7 @@ def collect_subreddits() -> set[str]:
 
             if not required_columns.issubset(reader.fieldnames or []):
                 raise ValueError(
-                    f"{path} is missing required columns. "
-                    f"Found: {reader.fieldnames}"
+                    f"{path} is missing required columns. Found: {reader.fieldnames}"
                 )
 
             for row in reader:
@@ -40,9 +39,7 @@ def collect_subreddits() -> set[str]:
                 target = row["TARGET_SUBREDDIT"]
 
                 if not source or not target:
-                    raise ValueError(
-                        f"Empty subreddit name in {path}: {row}"
-                    )
+                    raise ValueError(f"Empty subreddit name in {path}: {row}")
 
                 subreddits.add(source)
                 subreddits.add(target)
@@ -62,10 +59,7 @@ def write_nodes(subreddits: set[str]) -> dict[str, int]:
     # Sorting gives us deterministic IDs across runs.
     ordered = sorted(subreddits)
 
-    subreddit_to_id = {
-        name: index
-        for index, name in enumerate(ordered, start=1)
-    }
+    subreddit_to_id = {name: index for index, name in enumerate(ordered, start=1)}
 
     with NODES_FILE.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
@@ -73,10 +67,12 @@ def write_nodes(subreddits: set[str]) -> dict[str, int]:
         writer.writerow(["id", "name"])
 
         for name in ordered:
-            writer.writerow([
-                subreddit_to_id[name],
-                name,
-            ])
+            writer.writerow(
+                [
+                    subreddit_to_id[name],
+                    name,
+                ]
+            )
 
     return subreddit_to_id
 
@@ -92,14 +88,16 @@ def write_edges(subreddit_to_id: dict[str, int]) -> int:
     with EDGES_FILE.open("w", encoding="utf-8", newline="") as out:
         writer = csv.writer(out)
 
-        writer.writerow([
-            "id",
-            "start_id",
-            "start_vertex_type",
-            "end_id",
-            "end_vertex_type",
-            "sentimentScore",
-        ])
+        writer.writerow(
+            [
+                "id",
+                "start_id",
+                "start_vertex_type",
+                "end_id",
+                "end_vertex_type",
+                "sentimentScore",
+            ]
+        )
 
         for path in INPUT_FILES:
             print(f"Converting {path}...")
@@ -118,14 +116,16 @@ def write_edges(subreddit_to_id: dict[str, int]) -> int:
                             f"Invalid LINK_SENTIMENT in {path}: {row}"
                         ) from exc
 
-                    writer.writerow([
-                        edge_id,
-                        subreddit_to_id[source],
-                        "Subreddit",
-                        subreddit_to_id[target],
-                        "Subreddit",
-                        sentiment,
-                    ])
+                    writer.writerow(
+                        [
+                            edge_id,
+                            subreddit_to_id[source],
+                            "Subreddit",
+                            subreddit_to_id[target],
+                            "Subreddit",
+                            sentiment,
+                        ]
+                    )
 
                     edge_id += 1
 
