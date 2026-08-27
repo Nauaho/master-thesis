@@ -93,7 +93,7 @@ def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkR
     return _timed_repeated(func, n=n, cleanup=cleanup)
 
 
-def _timed_match(func, inputs: list[str], max_range: int) -> MatchResult:
+def _timed_match(func, inputs: list[str], max_range: int = MATCH_AGG_MAX) -> MatchResult:
     by_length = {}
     if max_range < 2:
         return MatchResult(by_pattern_length={})

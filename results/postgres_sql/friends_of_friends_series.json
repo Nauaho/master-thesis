@@ -1,0 +1,55 @@
+{
+  "by_pattern_length": {
+    "1": {
+      "cold_run": 0.0024417029999312945,
+      "hot_runs": [
+        0.0017236149997188477,
+        0.0013459340007102583,
+        0.0014319800002340344,
+        0.0014417709999179351
+      ],
+      "errors": []
+    },
+    "2": {
+      "cold_run": 0.0023293349995583412,
+      "hot_runs": [
+        0.0022728150006514625,
+        0.0024198900000556023,
+        0.002385967000009259,
+        0.0030558999997083447
+      ],
+      "errors": []
+    },
+    "3": {
+      "cold_run": 0.06558874599977571,
+      "hot_runs": [
+        0.03704524900058459,
+        0.05598544600070454,
+        0.04378080199967371,
+        0.043152183000529476
+      ],
+      "errors": []
+    },
+    "4": {
+      "cold_run": 6.415977468000165,
+      "hot_runs": [
+        3.77230002000033,
+        3.596863554000265,
+        4.312249700999928,
+        4.380890620000173
+      ],
+      "errors": []
+    },
+    "5": {
+      "cold_run": null,
+      "hot_runs": [],
+      "errors": [
+        "input='shitamericanssay', length=5: consuming input failed: server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.",
+        "input='botsrights', length=5: the connection is closed",
+        "input='gaming', length=5: the connection is closed",
+        "input='shitpost', length=5: the connection is closed",
+        "input='conspiracy', length=5: the connection is closed"
+      ]
+    }
+  }
+}
