@@ -17,7 +17,7 @@ from .base import (
     EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
-    TRAVERSAL_LIMIT
+    TRAVERSAL_LIMIT,
 )
 
 
@@ -30,13 +30,12 @@ INPUT_FILES = [
 
 
 class AGEBenchmark(GraphBenchmarks):
-
     def __init__(self, port: int):
-        self._port = port
+        self._port = 45755
 
         self._conn = psycopg.connect(
             host="localhost",
-            port=port,
+            port=45755,
             dbname="postgres",
             user="postgres",
             password="password",
@@ -45,17 +44,13 @@ class AGEBenchmark(GraphBenchmarks):
 
         self._conn.execute("CREATE EXTENSION IF NOT EXISTS age")
         self._conn.execute("LOAD 'age'")
-        self._conn.execute(
-            'SET search_path = ag_catalog, "$user", public'
-        )
+        self._conn.execute('SET search_path = ag_catalog, "$user", public')
 
-        try:
-            self._conn.execute(
-                f"SELECT create_graph('{GRAPH_NAME}')"
-            )
-        except psycopg.errors.UniqueViolation:
-            # Graph already exists.
-            pass
+        # try:
+        #     self._conn.execute(f"SELECT create_graph('{GRAPH_NAME}')")
+        # except psycopg.errors.UniqueViolation:
+        #     # Graph already exists.
+        #     pass
 
         self.db_name = "age"
 
@@ -127,9 +122,7 @@ class AGEBenchmark(GraphBenchmarks):
                     "LINK_SENTIMENT",
                 }
 
-                if not required_columns.issubset(
-                    reader.fieldnames or []
-                ):
+                if not required_columns.issubset(reader.fieldnames or []):
                     raise BenchmarkImportError(
                         f"{input_path} is missing required columns. "
                         f"Found: {reader.fieldnames}"
@@ -147,9 +140,7 @@ class AGEBenchmark(GraphBenchmarks):
                     subreddits.add(source)
                     subreddits.add(target)
 
-        print(
-            f"Found {len(subreddits):,} unique subreddits"
-        )
+        print(f"Found {len(subreddits):,} unique subreddits")
 
         # --------------------------------------------------------------
         # Assign deterministic numeric IDs.
@@ -182,16 +173,20 @@ class AGEBenchmark(GraphBenchmarks):
         ) as f:
             writer = csv.writer(f)
 
-            writer.writerow([
-                "id",
-                "name",
-            ])
+            writer.writerow(
+                [
+                    "id",
+                    "name",
+                ]
+            )
 
             for name in ordered_subreddits:
-                writer.writerow([
-                    subreddit_to_id[name],
-                    name,
-                ])
+                writer.writerow(
+                    [
+                        subreddit_to_id[name],
+                        name,
+                    ]
+                )
 
         # --------------------------------------------------------------
         # Write edge CSV.
@@ -214,14 +209,16 @@ class AGEBenchmark(GraphBenchmarks):
         ) as f:
             writer = csv.writer(f)
 
-            writer.writerow([
-                "id",
-                "start_id",
-                "start_vertex_type",
-                "end_id",
-                "end_vertex_type",
-                "sentimentScore",
-            ])
+            writer.writerow(
+                [
+                    "id",
+                    "start_id",
+                    "start_vertex_type",
+                    "end_id",
+                    "end_vertex_type",
+                    "sentimentScore",
+                ]
+            )
 
             for input_path in INPUT_FILES:
                 print(f"Converting {input_path}...")
@@ -240,18 +237,18 @@ class AGEBenchmark(GraphBenchmarks):
                         source_name = row["SOURCE_SUBREDDIT"]
                         target_name = row["TARGET_SUBREDDIT"]
 
-                        sentiment = float(
-                            row["LINK_SENTIMENT"]
-                        )
+                        sentiment = float(row["LINK_SENTIMENT"])
 
-                        writer.writerow([
-                            edge_id,
-                            subreddit_to_id[source_name],
-                            "Subreddit",
-                            subreddit_to_id[target_name],
-                            "Subreddit",
-                            sentiment,
-                        ])
+                        writer.writerow(
+                            [
+                                edge_id,
+                                subreddit_to_id[source_name],
+                                "Subreddit",
+                                subreddit_to_id[target_name],
+                                "Subreddit",
+                                sentiment,
+                            ]
+                        )
 
                         edge_id += 1
 
@@ -362,8 +359,7 @@ class AGEBenchmark(GraphBenchmarks):
 
         if result.returncode != 0:
             raise BenchmarkImportError(
-                "AGEFreighter failed with exit code "
-                f"{result.returncode}"
+                f"AGEFreighter failed with exit code {result.returncode}"
             )
 
     def _create_indexes(self) -> None:
@@ -464,13 +460,9 @@ class AGEBenchmark(GraphBenchmarks):
     def _analyze(self) -> None:
         print("Running ANALYZE...")
 
-        self._conn.execute(
-            f'ANALYZE {GRAPH_NAME}."Subreddit";'
-        )
+        self._conn.execute(f'ANALYZE {GRAPH_NAME}."Subreddit";')
 
-        self._conn.execute(
-            f'ANALYZE {GRAPH_NAME}."LINK_TO";'
-        )
+        self._conn.execute(f'ANALYZE {GRAPH_NAME}."LINK_TO";')
 
     def _validate_import(self) -> tuple[int, int]:
         """
@@ -479,19 +471,23 @@ class AGEBenchmark(GraphBenchmarks):
 
         print("Validating import...")
 
-        node_count = int(self._exec(
-            """
+        node_count = int(
+            self._exec(
+                """
             MATCH (n:Subreddit)
             RETURN count(n)
             """
-        )[0][0])
+            )[0][0]
+        )
 
-        edge_count = int(self._exec(
-            """
+        edge_count = int(
+            self._exec(
+                """
             MATCH ()-[r:LINK_TO]->()
             RETURN count(r)
             """
-        )[0][0])
+            )[0][0]
+        )
 
         print(f"{edge_count} : {type(edge_count)}")
         print(f"{node_count} : {type(node_count)}")
@@ -514,15 +510,10 @@ class AGEBenchmark(GraphBenchmarks):
 
         if errors:
             raise BenchmarkImportError(
-                "AGE import validation failed:\n"
-                + "\n".join(errors)
+                "AGE import validation failed:\n" + "\n".join(errors)
             )
 
-        print(
-            f"Validation successful: "
-            f"{node_count:,} nodes, "
-            f"{edge_count:,} edges"
-        )
+        print(f"Validation successful: {node_count:,} nodes, {edge_count:,} edges")
 
         return node_count, edge_count
 
@@ -551,40 +542,24 @@ class AGEBenchmark(GraphBenchmarks):
         try:
             print("=== AGE Reddit import ===")
 
-            with tempfile.TemporaryDirectory(
-                prefix="age_reddit_"
-            ) as temp_dir:
-
+            with tempfile.TemporaryDirectory(prefix="age_reddit_") as temp_dir:
                 temp_path = Path(temp_dir)
 
-                print(
-                    f"Preparing AGEFreighter data in "
-                    f"{temp_path}"
-                )
+                print(f"Preparing AGEFreighter data in {temp_path}")
 
                 (
                     config_path,
                     expected_nodes,
                     expected_edges,
-                ) = self._prepare_agefreighter_data(
-                    temp_path
-                )
+                ) = self._prepare_agefreighter_data(temp_path)
 
                 print()
-                print(
-                    f"Expected nodes: "
-                    f"{expected_nodes:,}"
-                )
-                print(
-                    f"Expected edges: "
-                    f"{expected_edges:,}"
-                )
+                print(f"Expected nodes: {expected_nodes:,}")
+                print(f"Expected edges: {expected_edges:,}")
                 print()
 
                 # Bulk import.
-                self._run_agefreighter(
-                    config_path
-                )
+                self._run_agefreighter(config_path)
 
             # CSV files are no longer needed after AGEFreighter exits.
             print()
@@ -603,9 +578,7 @@ class AGEBenchmark(GraphBenchmarks):
             raise
 
         except Exception as e:
-            raise BenchmarkImportError(
-                f"AGE import failed: {e}"
-            ) from e
+            raise BenchmarkImportError(f"AGE import failed: {e}") from e
 
     # ------------------------------------------------------------------
     # Aggregation
@@ -624,40 +597,40 @@ class AGEBenchmark(GraphBenchmarks):
         )
 
         self._conn.execute(
-                    f"""
+            f"""
                     CREATE INDEX IF NOT EXISTS
                         idx_link_to_id
                     ON {GRAPH_NAME}."LINK_TO_AGG"
                     USING BTREE (id);
                     """
         )
-        
+
         self._conn.execute(
-                    f"""
+            f"""
                     CREATE INDEX IF NOT EXISTS
                         idx_link_to_properties
                     ON {GRAPH_NAME}."LINK_TO_AGG"
                     USING GIN (properties);
                     """
         )
-        
+
         self._conn.execute(
-                    f"""
+            f"""
                     CREATE INDEX IF NOT EXISTS
                         idx_link_to_start_id
                     ON {GRAPH_NAME}."LINK_TO_AGG"
                     USING BTREE (start_id);
                     """
-                )
-        
+        )
+
         self._conn.execute(
-                    f"""
+            f"""
                     CREATE INDEX IF NOT EXISTS
                         idx_link_to_end_id
                     ON {GRAPH_NAME}."LINK_TO_AGG"
                     USING BTREE (end_id);
                     """
-                )
+        )
 
         self._conn.execute(
             f"""
@@ -676,12 +649,14 @@ class AGEBenchmark(GraphBenchmarks):
 
         self._conn.execute(f'ANALYZE {GRAPH_NAME}."LINK_TO_AGG";')
 
-        edge_agg_count = int(self._exec(
-            """
+        edge_agg_count = int(
+            self._exec(
+                """
             MATCH ()-[r:LINK_TO_AGG]->()
             RETURN count(r)
             """
-        )[0][0])
+            )[0][0]
+        )
 
         if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
             raise BenchmarkImportError(
@@ -695,7 +670,7 @@ class AGEBenchmark(GraphBenchmarks):
     # ------------------------------------------------------------------
 
     def aggregate_graph(self):
-        print("yes")
+
         def run():
             return self._exec(
                 """
@@ -708,10 +683,7 @@ class AGEBenchmark(GraphBenchmarks):
                 ORDER BY sumSentiment DESC
                 """,
                 out_cols=(
-                    "source agtype, "
-                    "target agtype, "
-                    "sentiment agtype, "
-                    "linkCount agtype"
+                    "source agtype, target agtype, sentiment agtype, linkCount agtype"
                 ),
             )
 
@@ -730,19 +702,17 @@ class AGEBenchmark(GraphBenchmarks):
             return self._exec(
                 f"""
                 MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+                    OPTIONAL MATCH (s)-[mustNotExistOne:LINK_TO_AGG]->(newFriend)
+                    OPTIONAL MATCH (newFriend)-[mustNotExistTwo:LINK_TO_AGG]->(s)
                 WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
-                    AND NOT (s)-[LINK_TO_AGG]->(newFriend)
-                    AND NOT (newFriend)-[LINK_TO_AGG]->(s)
+                    AND mustNotExistOne IS NULL AND mustNotExistTwo IS NULL
                 RETURN newFriend.name, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY
                     delta_interest DESC
 
-                LIMIT 500
+                LIMIT {TRAVERSAL_LIMIT}
                 """,
-                out_cols=(
-                    "newFriend agtype, "
-                    "delta_interest agtype"
-                ),
+                out_cols=("newFriend agtype, delta_interest agtype"),
             )
 
         return _timed_per_input(
@@ -757,28 +727,17 @@ class AGEBenchmark(GraphBenchmarks):
     ):
         op = self._sentiment_op(category)
 
-        if(category == "positive"):
-            def run(name: str):
-                return self._exec(
-                    f"""
-                    MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
-                    WHERE min(r.sentiment IN relationships(p)) {op} AND a <> b
-                    RETURN p
-                    LIMIT 500
-                    """,
-                    out_cols="p agtype",
-                )
-        else:
-            def run(name: str):
-                return self._exec(
-                    f"""
-                    MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
-                    WHERE max(r.sentiment IN relationships(p)) {op} AND a <> b
-                    RETURN p
-                    LIMIT 500
-                    """,
-                    out_cols="p agtype",
-                )
+        def run(name: str):
+            return self._exec(
+                f"""
+                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
+                WHERE r1.sentiment {op} AND r2.sentiment {op} AND r3.sentiment {op} AND a <> b
+                RETURN p
+                LIMIT {TRAVERSAL_LIMIT}
+                """,
+                out_cols="p agtype",
+            )
+
         return _timed_per_input(
             run,
             subreddit_names,
@@ -786,14 +745,28 @@ class AGEBenchmark(GraphBenchmarks):
 
     def friends_of_friends(self, subreddit_names: list[str]):
         def run(name: str, pattern_length: int):
-            return self._exec(f"""
-                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[:LINK_TO_AG*{pattern_length}]->(friend:Subreddit)
-                WHERE min(r.sentiment IN relationships(p)) > 0.33 AND count(DISTINCT nodes(p)) = {pattern_length}
+            return self._exec(
+                f"""
+                MATCH p =
+                    (s:Subreddit {{name: '{self._escape(name)}' }})
+                    -[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
+
+                UNWIND relationships(p) AS r
+                WITH p, min(r.sentiment) AS min_sentiment
+
+                WHERE min_sentiment > 0.33
+
+                UNWIND nodes(p) AS n
+                WITH p, count(DISTINCT n) AS distinct_node_count
+
+                WHERE distinct_node_count = {pattern_length + 1}
+
                 RETURN p
                 LIMIT {TRAVERSAL_LIMIT}
                 """,
                 out_cols="p agtype",
             )
+
         return _timed_match(run, subreddit_names)
 
     # ------------------------------------------------------------------
@@ -838,6 +811,4 @@ def wait_age_ready(
             last_err = e
             time.sleep(1)
 
-    raise TimeoutError(
-        f"AGE (postgres) not ready on port {port}"
-    ) from last_err
+    raise TimeoutError(f"AGE (postgres) not ready on port {port}") from last_err

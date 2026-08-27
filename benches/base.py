@@ -24,6 +24,21 @@ GRAPH_QUERY_SUBREDDITS = [
 ]
 LINKS_CATEGORIES = ("positive", "negative")
 
+RESULTS_FILE = Path("benchmark_results.jsonl")
+
+
+def _log_result(function_name: str, result, metadata=None):
+    record = {
+        "function": function_name,
+        "result": result,
+    }
+
+    if metadata:
+        record.update(metadata)
+
+    with RESULTS_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, default=str) + "\n")
+
 
 @dataclass
 class BenchMarkResult:
@@ -58,10 +73,19 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
     """Same query run n times identically — cold_run captures cache-miss cost,
     hot_runs capture cache-warmed performance."""
     times = []
-    for _ in range(n):
+    for i in range(n):
         start = time.perf_counter()
-        func()
-        times.append(time.perf_counter() - start)
+        result = func()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+        _log_result(
+            func.__name__,
+            result,
+            {
+                "run": i + 1,
+                "elapsed_seconds": elapsed,
+            },
+        )
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
@@ -69,44 +93,87 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
 
 
 def _timed_per_input(func, inputs: list) -> BenchMarkResult:
-    """One rep per distinct input — no cold/hot framing, since each rep is a
-    genuinely different query/operation, not a repeat of the same one."""
+    """One rep per distinct input."""
     times = []
-    for item in inputs:
+    for i, item in enumerate(inputs):
         start = time.perf_counter()
-        func(item)
-        times.append(time.perf_counter() - start)
+        result = func(item)
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+        _log_result(
+            func.__name__,
+            result,
+            {
+                "input": item,
+                "run": i + 1,
+                "elapsed_seconds": elapsed,
+            },
+        )
     cold_run, *hot_runs = times
-    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+    return BenchMarkResult(
+        cold_run=cold_run,
+        hot_runs=hot_runs,
+    )
 
 
-def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
+def _timed_index_build(
+    func,
+    n: int = 5,
+    cleanup: callable = None,
+) -> BenchMarkResult:
     times = []
-    for _ in range(n):
+    for i in range(n):
         start = time.perf_counter()
-        func()
-        times.append(time.perf_counter() - start)
+        result = func()
+        elapsed = time.perf_counter() - start
+        times.append(elapsed)
+        _log_result(
+            func.__name__,
+            result,
+            {
+                "run": i + 1,
+                "elapsed_seconds": elapsed,
+            },
+        )
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
-    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+    return BenchMarkResult(
+        cold_run=cold_run,
+        hot_runs=hot_runs,
+    )
 
 
-def _timed_match(func, inputs: list[str], max_range = MATCH_AGG_MAX) -> MatchResult:
-    """func(pattern_length) run n times per pattern length (n x k total calls)."""
+def _timed_match(
+    func,
+    inputs: list[str],
+    max_range=MATCH_AGG_MAX,
+) -> MatchResult:
     by_length = {}
-    if(max_range < 2):
+    if max_range < 2:
         return MatchResult()
-    for k in range(1,max_range + 1):
+    for k in range(1, max_range + 1):
         times = []
         for item in inputs:
             start = time.perf_counter()
-            func(item, k)
-            times.append(time.perf_counter() - start)
+            result = func(item, k)
+            elapsed = time.perf_counter() - start
+            times.append(elapsed)
+            _log_result(
+                func.__name__,
+                result,
+                {
+                    "input": item,
+                    "pattern_length": k,
+                    "elapsed_seconds": elapsed,
+                },
+            )
         cold_run, *hot_runs = times
-        by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+        by_length[k] = BenchMarkResult(
+            cold_run=cold_run,
+            hot_runs=hot_runs,
+        )
     return MatchResult(by_pattern_length=by_length)
-
 
 class BenchmarkImportError(Exception):
     """Raised when import_data fails to populate the database."""
@@ -126,7 +193,8 @@ class BaseBenchmarks(ABC):
 
     def perform_benchmark(self):
         try:
-            self.import_data()
+            print("yay")
+            # self.import_data()
         except BenchmarkImportError as e:
             print(f"[{self.db_name}] Import failed, skipping benchmarks: {e}")
             return
@@ -196,10 +264,8 @@ class GraphBenchmarks(BaseBenchmarks):
                 f"cycle_{category}", self.cycle_detection(subreddit_names, category)
             )
 
-        print(f"[{self.db_name}] Performing common-neighbour match benchmark.")
-        self._save(
-            "friends_of_friends", self.friends_of_friends(subreddit_names)
-        )
+        print(f"[{self.db_name}] Performing friends of friends match benchmark.")
+        self._save("friends_of_friends", self.friends_of_friends(subreddit_names))
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 

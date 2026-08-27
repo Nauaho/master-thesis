@@ -2,7 +2,7 @@
 import time
 import csv
 import asyncio
-from surreal_db import Surreal
+from surrealdb import Surreal, RecordID
 from .base import (
     GraphBenchmarks,
     VectorBenchmarks,
@@ -11,27 +11,18 @@ from .base import (
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
+    TRAVERSAL_LIMIT,
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
+    _timed_match,
 )
 
 INDEX_NAME = "subreddit_embeddings"  # single source of truth
+EMBEDDING_DIMENSION = 300  # derived from the source embeddings file; not hardcoded per-query
 
 
 class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
-    """
-    Graph model:
-        subreddit             -- node table
-        link_to  (RELATION)   -- raw edges, subreddit ->link_to-> subreddit
-        link_to_agg (RELATION)-- aggregated edges, subreddit ->link_to_agg-> subreddit
-
-    All multi-hop reads use SurrealQL arrow traversal (`->edge->table`,
-    `<-edge<-table`) with inline edge filtering (`->(edge WHERE cond)->table`)
-    rather than manual JOINs, per SurrealDB's recommended graph-traversal
-    patterns: https://surrealdb.com/docs/learn/data-models/graph/graph-traversal
-    """
-
     def __init__(self, url: str = "ws://localhost:8000"):
         self.url = url
         self._db = None
@@ -47,33 +38,48 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         await self._connect()
         return await self._db.query(query, params)
 
+    async def _scalar_count(self, query: str) -> int:
+        result = await self._db.query(query)
+        rows = result[0]["result"] if isinstance(result[0], dict) else result[0]
+        return rows[0]["c"] if rows else 0
+
     # ------------------------------------------------------------------ #
-    # Import
+    # Schema
+    # ------------------------------------------------------------------ #
+
+    async def _define_schema(self):
+        await self._db.query(
+            """
+            DEFINE TABLE OVERWRITE subreddit TYPE NORMAL SCHEMAFULL;
+            DEFINE FIELD OVERWRITE name ON TABLE subreddit TYPE string;
+            DEFINE FIELD OVERWRITE embedding ON TABLE subreddit TYPE option<array<float>>;
+            DEFINE INDEX OVERWRITE subreddit_name ON TABLE subreddit FIELDS name UNIQUE;
+
+            DEFINE TABLE OVERWRITE link_to TYPE RELATION IN subreddit OUT subreddit SCHEMAFULL;
+            DEFINE FIELD OVERWRITE post_id ON TABLE link_to TYPE string;
+            DEFINE FIELD OVERWRITE timestamp ON TABLE link_to TYPE datetime;
+            DEFINE FIELD OVERWRITE sentiment_score ON TABLE link_to TYPE float;
+            DEFINE FIELD OVERWRITE properties ON TABLE link_to TYPE array<float>;
+            -- composite index: aggregation groups by (in, out)
+            DEFINE INDEX OVERWRITE link_to_in_out ON TABLE link_to FIELDS in, out;
+
+            DEFINE TABLE OVERWRITE link_to_agg TYPE RELATION IN subreddit OUT subreddit SCHEMAFULL;
+            DEFINE FIELD OVERWRITE sentiment ON TABLE link_to_agg TYPE float;
+            DEFINE FIELD OVERWRITE link_count ON TABLE link_to_agg TYPE int;
+            DEFINE INDEX OVERWRITE link_to_agg_in_out ON TABLE link_to_agg FIELDS in, out UNIQUE;
+            -- queries filter on sentiment (common_neighbour_match, cycle_detection)
+            DEFINE INDEX OVERWRITE agg_link_sentiment ON TABLE link_to_agg FIELDS sentiment;
+            """
+        )
+
+    # ------------------------------------------------------------------ #
+    # Import — native bulk INSERT / INSERT RELATION
     # ------------------------------------------------------------------ #
 
     async def import_data(self):
         try:
             await self._connect()
-
-            await self._db.query(
-                """
-                DEFINE TABLE subreddit SCHEMAFULL;
-                DEFINE FIELD name ON TABLE subreddit TYPE string;
-                DEFINE FIELD embedding ON TABLE subreddit TYPE option<array<float>>;
-                DEFINE INDEX subreddit_name ON TABLE subreddit FIELDS name UNIQUE;
-
-                DEFINE TABLE link_to TYPE RELATION IN subreddit OUT subreddit SCHEMAFULL;
-                DEFINE FIELD post_id ON TABLE link_to TYPE string;
-                DEFINE FIELD timestamp ON TABLE link_to TYPE datetime;
-                DEFINE FIELD sentiment_score ON TABLE link_to TYPE float;
-                DEFINE FIELD properties ON TABLE link_to TYPE array<float>;
-
-                DEFINE TABLE link_to_agg TYPE RELATION IN subreddit OUT subreddit SCHEMAFULL;
-                DEFINE FIELD sentiment ON TABLE link_to_agg TYPE float;
-                DEFINE FIELD link_count ON TABLE link_to_agg TYPE int;
-                DEFINE INDEX agg_link_sentiment ON TABLE link_to_agg FIELDS sentiment;
-                """
-            )
+            await self._define_schema()
 
             for filename in [
                 "soc-redditHyperlinks-body.tsv",
@@ -90,46 +96,41 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         return await self._validate_import()
 
     async def _import_links_from_tsv(self, filename: str, batch_size: int = 5000):
-        """RELATE subreddit->link_to->subreddit for every row, batched."""
         with open(filename, "r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f, delimiter="\t")
-            batch = []
+            nodes, edges = set(), []
 
             for row in reader:
-                batch.append(
+                source, target = row["SOURCE_SUBREDDIT"], row["TARGET_SUBREDDIT"]
+                nodes.add(source)
+                nodes.add(target)
+                edges.append(
                     {
-                        "source": row["SOURCE_SUBREDDIT"],
-                        "target": row["TARGET_SUBREDDIT"],
+                        "in": RecordID("subreddit", source),
+                        "out": RecordID("subreddit", target),
                         "post_id": row["POST_ID"],
                         "timestamp": row["TIMESTAMP"].replace(" ", "T"),
                         "sentiment_score": float(row["LINK_SENTIMENT"]),
-                        "properties": [float(p) for p in row["PROPERTIES"].split(",")],
+                        "properties": [
+                            float(p) for p in row["PROPERTIES"].split(",")
+                        ],
                     }
                 )
-                if len(batch) >= batch_size:
-                    await self._relate_link_batch(batch)
-                    batch = []
+                if len(edges) >= batch_size:
+                    await self._upsert_nodes(nodes)
+                    await self._db.insert_relation("link_to", edges)
+                    nodes, edges = set(), []
 
-            if batch:
-                await self._relate_link_batch(batch)
+            if nodes:
+                await self._upsert_nodes(nodes)
+            if edges:
+                await self._db.insert_relation("link_to", edges)
 
-    async def _relate_link_batch(self, rows: list[dict]):
+    async def _upsert_nodes(self, names: set[str]):
+        rows = [{"id": RecordID("subreddit", n), "name": n} for n in names]
+        # native bulk upsert: single INSERT statement, dedup via ON DUPLICATE KEY UPDATE
         await self._db.query(
-            """
-            FOR $row IN $rows {
-                UPSERT type::thing('subreddit', $row.source) SET name = $row.source;
-                UPSERT type::thing('subreddit', $row.target) SET name = $row.target;
-
-                RELATE (type::thing('subreddit', $row.source))
-                    ->link_to->
-                    (type::thing('subreddit', $row.target))
-                SET
-                    post_id = $row.post_id,
-                    timestamp = <datetime>$row.timestamp,
-                    sentiment_score = $row.sentiment_score,
-                    properties = $row.properties;
-            };
-            """,
+            "INSERT INTO subreddit $rows ON DUPLICATE KEY UPDATE name = $input.name;",
             {"rows": rows},
         )
 
@@ -145,15 +146,16 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                     emb = [float(x) for x in row[1:]]
                 except ValueError:
                     continue
-
                 if (
-                    len(emb) != 300
+                    len(emb) != EMBEDDING_DIMENSION
                     or any(x is None for x in emb)
                     or all(x == 0.0 for x in emb)
                 ):
                     continue
 
-                batch.append({"name": row[0], "embedding": emb})
+                batch.append(
+                    {"id": RecordID("subreddit", row[0]), "name": row[0], "embedding": emb}
+                )
                 if len(batch) >= batch_size:
                     await self._upsert_embedding_batch(batch)
                     batch = []
@@ -164,49 +166,39 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     async def _upsert_embedding_batch(self, rows: list[dict]):
         await self._db.query(
             """
-            FOR $row IN $rows {
-                UPSERT type::thing('subreddit', $row.name)
-                    SET name = $row.name, embedding = $row.embedding;
-            };
+            INSERT INTO subreddit $rows
+            ON DUPLICATE KEY UPDATE name = $input.name, embedding = $input.embedding;
             """,
             {"rows": rows},
         )
 
     async def _validate_import(self):
-        node_count = await self._scalar_count(
-            "SELECT count() AS c FROM subreddit GROUP ALL;"
-        )
+        node_count = await self._scalar_count("SELECT count() AS c FROM subreddit GROUP ALL;")
         embedded_count = await self._scalar_count(
             "SELECT count() AS c FROM subreddit WHERE embedding IS NOT NONE GROUP ALL;"
         )
-        edge_count = await self._scalar_count(
-            "SELECT count() AS c FROM link_to GROUP ALL;"
-        )
+        edge_count = await self._scalar_count("SELECT count() AS c FROM link_to GROUP ALL;")
 
         errors = []
         if node_count != EXPECTED_NODE_COUNT:
-            errors.append(
-                f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}"
-            )
+            errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
         if embedded_count != EXPECTED_EMBEDDED_NODE_COUNT:
             errors.append(
                 f"embedded node count: expected {EXPECTED_EMBEDDED_NODE_COUNT}, got {embedded_count}"
             )
         if edge_count != EXPECTED_EDGE_COUNT:
-            errors.append(
-                f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}"
-            )
+            errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
 
         bad_length_count = await self._scalar_count(
-            """
+            f"""
             SELECT count() AS c FROM subreddit
-            WHERE embedding IS NOT NONE AND array::len(embedding) != 300
+            WHERE embedding IS NOT NONE AND array::len(embedding) != {EMBEDDING_DIMENSION}
             GROUP ALL;
             """
         )
         if bad_length_count != 0:
             errors.append(
-                f"embedding dimension mismatch: {bad_length_count} node(s) have embedding length != 300"
+                f"embedding dimension mismatch: {bad_length_count} node(s) have embedding length != {EMBEDDING_DIMENSION}"
             )
 
         null_element_count = await self._scalar_count(
@@ -228,31 +220,33 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return node_count, embedded_count, edge_count
 
-    async def _scalar_count(self, query: str) -> int:
-        result = await self._db.query(query)
-        rows = result[0]["result"] if isinstance(result[0], dict) else result[0]
-        return rows[0]["c"] if rows else 0
-
     # ------------------------------------------------------------------ #
-    # Vector index lifecycle
+    # Vector index lifecycle — HNSW (in-memory) / DISKANN (disk-backed)
     # ------------------------------------------------------------------ #
-
-    async def ivf_index_build(self):
-        print(f"[{self.db_name}] IVF index build not supported, skipping.")
-        return None
 
     async def hnsw_index_build(self):
         async def build():
             await self._db.query(
-                f"""
-                DEFINE INDEX {INDEX_NAME} ON TABLE subreddit
-                    FIELDS embedding
-                    HNSW DIMENSION 300 DIST COSINE;
-                """
+                f"DEFINE INDEX OVERWRITE {INDEX_NAME} ON TABLE subreddit "
+                f"FIELDS embedding HNSW DIMENSION {EMBEDDING_DIMENSION} DIST COSINE;"
             )
 
         async def drop():
-            await self._db.query(f"REMOVE INDEX {INDEX_NAME} ON TABLE subreddit;")
+            await self._db.query(f"REMOVE INDEX IF EXISTS {INDEX_NAME} ON TABLE subreddit;")
+
+        return await _timed_index_build(build, n=5, cleanup=drop)
+
+    async def ivf_index_build(self):
+        """IVF has no native equivalent in SurrealDB; DISKANN fills the same
+        role (disk-backed ANN index for corpora too large to keep in RAM)."""
+        async def build():
+            await self._db.query(
+                f"DEFINE INDEX OVERWRITE {INDEX_NAME} ON TABLE subreddit "
+                f"FIELDS embedding DISKANN DIMENSION {EMBEDDING_DIMENSION} DIST COSINE;"
+            )
+
+        async def drop():
+            await self._db.query(f"REMOVE INDEX IF EXISTS {INDEX_NAME} ON TABLE subreddit;")
 
         return await _timed_index_build(build, n=5, cleanup=drop)
 
@@ -261,8 +255,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     # ------------------------------------------------------------------ #
 
     async def persist_aggregation(self):
-        # Aggregate raw edges grouped by (in, out), then materialize as
-        # link_to_agg edges via RELATE.
         await self._db.query(
             """
             LET $pairs = SELECT
@@ -272,12 +264,12 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 FROM link_to
                 GROUP BY in, out;
 
-            FOR $pair IN $pairs {
-                RELATE ($pair.in)->link_to_agg->($pair.out)
-                    SET sentiment = $pair.sentiment, link_count = $pair.link_count;
-            };
+            INSERT RELATION INTO link_to_agg $pairs;
             """
         )
+     
+        await self._exec("REBUILD INDEX link_to_agg_in_out ON TABLE link_to_agg;")
+        await self._exec("REBUIK INDEX agg_link_sentiment ON TABLE link_to_agg;")
 
         edge_agg_count = await self._scalar_count(
             "SELECT count() AS c FROM link_to_agg GROUP ALL;"
@@ -309,20 +301,9 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     # ------------------------------------------------------------------ #
 
     async def common_neighbour_match(self, subreddit_names: list[str]):
-        """
-        Mirrors Cypher's:
-            (s)-[r1:LINK_TO_AGG]->(common)<-[r2:LINK_TO_AGG]-(newFriend)
-            WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
-              AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
-              AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
-
-        via arrow traversal + inline edge filters. SurrealDB's traversal
-        collapses each hop to a distinct node set (no path identity), so
-        the per-pair (r1, r2) sentiment values are recovered with a direct
-        edge lookup keyed on the now-known record ids, rather than carried
-        along the path the way Cypher does natively.
-        """
-
+        # SurrealDB traversal collapses each hop to a distinct node set (no
+        # path identity like Cypher), so r1/r2 sentiment is recovered with a
+        # direct edge lookup on the resolved ids rather than carried on the path.
         async def run(name: str):
             return await self._db.query(
                 """
@@ -362,19 +343,7 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return await _timed_per_input(run, subreddit_names)
 
-    async def cycle_detection(
-        self, subreddit_names: list[str], category: str = "positive"
-    ):
-        """
-        Mirrors Cypher's 3-hop cycle:
-            (s)-[:LINK_TO_AGG]->(a)-[:LINK_TO_AGG]->(b)-[:LINK_TO_AGG]->(s)
-            WHERE all sentiments satisfy `op`, a <> b
-
-        Chained arrow traversal walks three hops in one statement; the
-        result is the flattened set of subreddits reachable in exactly
-        three qualifying hops. A cycle back to the start closes when `$s`
-        itself appears in that set.
-        """
+    async def cycle_detection(self, subreddit_names: list[str], category: str = "positive"):
         op = self._sentiment_op(category)
 
         async def run(name: str):
@@ -389,7 +358,7 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                         ->(link_to_agg WHERE sentiment {op})->subreddit
                 )
                 WHERE id = $s
-                LIMIT 500;
+                LIMIT {TRAVERSAL_LIMIT};
                 """,
                 {"name": name},
             )
@@ -397,23 +366,16 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         return await _timed_per_input(run, subreddit_names)
 
     # ------------------------------------------------------------------ #
-    # Vector search — SurrealDB's KNN operator
+    # Vector search — native KNN operator
     # ------------------------------------------------------------------ #
 
     async def knn(self, query_vectors: dict, k: int = 10):
-        """
-        Brute-force exact KNN. Passing an explicit distance function inside
-        `<|K, DIST|>` always forces the brute-force path, even if an index
-        exists on the field — see the vector search cheat sheet:
-        https://surrealdb.com/docs/learn/data-models/vector-search/vector-indexes
-        """
-
+        # explicit distance inside <|K, DIST|> always forces brute force,
+        # even with an index defined on the field
         async def run_query(vec):
             return await self._db.query(
                 """
-                SELECT
-                    name,
-                    vector::distance::knn() AS dist
+                SELECT name, vector::distance::knn() AS dist
                 FROM subreddit
                 WHERE embedding IS NOT NONE AND embedding <|$k, COSINE|> $vec;
                 """,
@@ -422,32 +384,25 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return await _timed_per_input(run_query, inputs=list(query_vectors.values()))
 
-    async def ann(
-        self, index_type: str, query_vectors: dict[str, list[float]], k: int = 10
-    ):
+    async def ann(self, index_type: str, query_vectors: dict[str, list[float]], k: int = 10):
         if index_type == "ivf":
-            print(f"[{self.db_name}] IVF not supported, skipping ANN-IVF.")
-            return None
-        if index_type != "hnsw":
+            await self._db.query(
+                f"DEFINE INDEX OVERWRITE {INDEX_NAME} ON TABLE subreddit "
+                f"FIELDS embedding DISKANN DIMENSION {EMBEDDING_DIMENSION} DIST COSINE;"
+            )
+        elif index_type == "hnsw":
+            await self._db.query(
+                f"DEFINE INDEX OVERWRITE {INDEX_NAME} ON TABLE subreddit "
+                f"FIELDS embedding HNSW DIMENSION {EMBEDDING_DIMENSION} DIST COSINE;"
+            )
+        else:
             raise ValueError(f"Unknown index_type: {index_type}")
 
-        # One-time setup: build index BEFORE the timed loop
-        await self._db.query(
-            f"""
-            DEFINE INDEX {INDEX_NAME} ON TABLE subreddit
-                FIELDS embedding
-                HNSW DIMENSION 300 DIST COSINE;
-            """
-        )
-
         async def run_query(vec):
-            # Bare `<|k|>` (no explicit distance) routes through the HNSW
-            # index, using the distance function it was defined with.
+            # bare <|k|> routes through whichever index is defined on the field
             return await self._db.query(
                 """
-                SELECT
-                    name,
-                    vector::distance::knn() AS dist
+                SELECT name, vector::distance::knn() AS dist
                 FROM subreddit
                 WHERE embedding <|$k|> $vec;
                 """,
@@ -455,11 +410,9 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             )
 
         try:
-            return await _timed_per_input(
-                run_query, inputs=list(query_vectors.values())
-            )
+            return await _timed_per_input(run_query, inputs=list(query_vectors.values()))
         finally:
-            await self._db.query(f"REMOVE INDEX {INDEX_NAME} ON TABLE subreddit;")
+            await self._db.query(f"REMOVE INDEX IF EXISTS {INDEX_NAME} ON TABLE subreddit;")
 
     # ------------------------------------------------------------------ #
 

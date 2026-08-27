@@ -9,6 +9,7 @@ from benches.pgvector import PgVectorBenchmark, wait_pgvector_ready
 from benches.falcordb import FalkorDBBenchmark, wait_falkordb_ready
 from benches.age import AGEBenchmark, wait_age_ready
 from benches.pure_pg import PostgresGraphBenchmark, wait_postgres_sql_ready
+from benches.surreal_db import SurrealDBBenchmark, wait_surrealdb_ready
 from pathlib import Path
 
 CPU_QUOTA = 4_000_000_000
@@ -64,67 +65,94 @@ class DBSpec:
 
 
 db_specs = [
+    DBSpec(
+        image=NEO4J,
+        internal_port=7687,
+        env={
+            "NEO4J_AUTH": "neo4j/password",
+            "NEO4J_dbms_directories_import": "/import",
+            "NEO4J_server_memory_heap_initial__size": "5g",
+            "NEO4J_server_memory_heap_max__size": "5g",
+            "NEO4J_server_memory_pagecache_size": "7g"
+        },
+        benchmark_cls=Neo4jBenchamrk,
+        wait_ready=wait_neo4j_ready,
+        volumes={
+            str(DATA_DIR): {"bind": "/import", "mode": "ro"}
+        },
+    ),
+    DBSpec(
+        image=REDIS,
+        internal_port=6379,
+        env={},
+        benchmark_cls=RedisBenchmark,
+        wait_ready=wait_redis_ready,
+        volumes=None,
+        command=["redis-server", "--maxmemory", "14gb"]
+    ),
+    DBSpec(
+        image=CHROMA,
+        internal_port=8000,
+        env={"IS_PERSISTENT": "TRUE"},
+        benchmark_cls=ChromaBenchmark,
+        wait_ready=wait_chroma_ready,
+        volumes=None,
+    ),
+    DBSpec(
+        image=PGVECTOR,
+        internal_port=5432,
+        env={"POSTGRES_PASSWORD": "password"},
+        benchmark_cls=PgVectorBenchmark,
+        wait_ready=wait_pgvector_ready,
+        volumes={
+            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+        },
+        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+        ),
+    DBSpec(
+        image=FALCOR,
+        internal_port=6379,
+        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+        benchmark_cls=FalkorDBBenchmark,
+        wait_ready=wait_falkordb_ready,
+        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+        command=["redis-server", "--maxmemory", "14gb"],
+    ),
+    DBSpec(
+        image=POSTGRES,
+        internal_port=5432,
+        env={"POSTGRES_PASSWORD": "password"},
+        volumes={
+            str(DATA_DIR): {"bind": "/import", "mode": "ro"},
+            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+        },
+        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+        benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
+        wait_ready=wait_postgres_sql_ready,
+    ),
     # DBSpec(
-    #     image=NEO4J,
-    #     internal_port=7687,
-    #     env={
-    #         "NEO4J_AUTH": "neo4j/password",
-    #         "NEO4J_dbms_directories_import": "/import",
-    #         "NEO4J_server_memory_heap_initial__size": "5g",
-    #         "NEO4J_server_memory_heap_max__size": "5g",
-    #         "NEO4J_server_memory_pagecache_size": "7g"
-    #     },
-    #     benchmark_cls=Neo4jBenchamrk,
-    #     wait_ready=wait_neo4j_ready,
-    #     volumes={
-    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"}
-    #     },
-    # ),
-    # DBSpec(
-    #     image=FALCOR,
-    #     internal_port=6379,
+    #     image=MONGO,
+    #     internal_port=27017,
     #     env={},
-    #     benchmark_cls=FalkorDBBenchmark,
-    #     wait_ready=wait_falkordb_ready,
-    #     volumes={str(DATA_DIR): {"bind": "/data/import", "mode": "ro"}},
+    #     benchmark_cls=MongoBenchmark,
+    #     wait_ready=wait_mongo_ready,
+    #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
     # ),
-    # DBSpec(
-    #     image=REDIS,
-    #     internal_port=6379,
-    #     env={},
-    #     benchmark_cls=RedisBenchmark,
-    #     wait_ready=wait_redis_ready,
-    #     volumes=None,
-    #     command=["redis-server", "--maxmemory", "14gb"]
-    # ),
-    # DBSpec(
-    #     image=CHROMA,
-    #     internal_port=8000,
-    #     env={"IS_PERSISTENT": "TRUE"},
-    #     benchmark_cls=ChromaBenchmark,
-    #     wait_ready=wait_chroma_ready,
-    #     volumes=None,
-    # ),
-    # DBSpec(
-    #     image=PGVECTOR,
-    #     internal_port=5432,
-    #     env={"POSTGRES_PASSWORD": "password"},
-    #     benchmark_cls=PgVectorBenchmark,
-    #     wait_ready=wait_pgvector_ready,
-    #     volumes={
-    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-    #     },
-    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
-    #     ),
-    # DBSpec(
-    #     image=FALCOR,
-    #     internal_port=6379,
-    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-    #     benchmark_cls=FalkorDBBenchmark,
-    #     wait_ready=wait_falkordb_ready,
-    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-    #     command=["redis-server", "--maxmemory", "14gb"],
-    # ),
+    DBSpec(
+        image=SURREAL,
+        internal_port=8000,
+        env={},
+        volumes={},
+        benchmark_cls=SurrealDBBenchmark,
+        wait_ready=wait_surrealdb_ready,
+        command=[
+            "/surreal",
+            "start",
+            "--user", "root",
+            "--unauthenticated",
+            "rocksdb://data/surreal.db",
+        ],
+    ),
     DBSpec(
         image=AGE,
         internal_port=5432,
@@ -142,26 +170,6 @@ db_specs = [
         benchmark_cls=AGEBenchmark,
         wait_ready=wait_age_ready,
     ),
-    # DBSpec(
-    #     image=POSTGRES,
-    #     internal_port=5432,
-    #     env={"POSTGRES_PASSWORD": "password"},
-    #     volumes={
-    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"},
-    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-    #     },
-    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
-    #     benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
-    #     wait_ready=wait_postgres_sql_ready,
-    # ),
-    # DBSpec(
-    #     image=MONGO,
-    #     internal_port=27017,
-    #     env={},
-    #     benchmark_cls=MongoBenchmark,
-    #     wait_ready=wait_mongo_ready,
-    #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
-    # )
 ]
 
 

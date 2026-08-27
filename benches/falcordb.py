@@ -10,10 +10,12 @@ from .base import (
     _timed_repeated,
     _timed_per_input,
     _timed_index_build,
+    _timed_match,
     EXPECTED_NODE_COUNT,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    TRAVERSAL_LIMIT
 )
 
 VECTOR_DIM = 300
@@ -258,15 +260,15 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     def common_neighbour_match(self, subreddit_names: list[str]):
         def run(name):
             return self._exec(
-                """
-                MATCH (s:Subreddit {name: $name})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+                f"""
+                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
                 WHERE r1.sentiment > 0.5 AND r2.sentiment > 0.5
                     AND s <> newFriend
                     AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
                     AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
                 RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY delta_interest DESC
-                LIMIT 100
+                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
@@ -281,12 +283,22 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 f"""
                 MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
                 WHERE all(r IN relationships(p) WHERE r.sentiment {op}) AND a <> b
-                RETURN p LIMIT 500
+                RETURN p LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
 
         return _timed_per_input(run, subreddit_names)
+
+    def friends_of_friends(self, subreddit_names: list[str]):
+        def run(name: str, pattern_length: int):
+            return self._exec(f"""
+                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
+                WHERE all(r IN relationships(p) WHERE r.sentiment > 0.33)
+                AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
+                RETURN p LIMIT {TRAVERSAL_LIMIT}
+            """, name=name)
+        return _timed_match(run, subreddit_names)
 
     def __enter__(self):
         return self

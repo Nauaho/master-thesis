@@ -6,9 +6,11 @@ from .base import (
     BenchmarkImportError,
     _timed_repeated,
     _timed_per_input,
+    _timed_match,
     EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    TRAVERSAL_LIMIT
 )
 
 
@@ -183,7 +185,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
             source_id = source_id_row[0]
 
             return self._conn.execute(
-                """
+                f"""
                 SELECT s2.name AS new_friend, (r2.sentiment - r1.sentiment) AS delta_interest
                 FROM link_to_agg r1
                 JOIN link_to_agg r2 ON r1.target_id = r2.target_id
@@ -200,7 +202,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                       WHERE x.source_id = r2.source_id AND x.target_id = r1.source_id
                   )
                 ORDER BY delta_interest DESC
-                LIMIT 100
+                LIMIT {TRAVERSAL_LIMIT}
             """,
                 (source_id,),
             ).fetchall()
@@ -232,12 +234,37 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                 WHERE e1.source_id = %s
                   AND e1.target_id <> e2.target_id
                   AND e1.sentiment {op} AND e2.sentiment {op} AND e3.sentiment {op}
-                LIMIT 500
+                LIMIT {TRAVERSAL_LIMIT}
             """,
                 (source_id,),
             ).fetchall()
 
         return _timed_per_input(run, subreddit_names)
+
+    def friends_of_friends(self, subreddit_names: list[str], pattern_lengths: range):
+        def run(pattern_length: int, name: str):
+            return self._conn.execute("""
+                WITH RECURSIVE traversal AS (
+                    SELECT target_subreddit AS current,
+                        ARRAY[source_subreddit, target_subreddit] AS path,
+                        1 AS depth
+                    FROM link_to_agg
+                    WHERE source_subreddit = %s AND sentiment > 0.33
+
+                    UNION ALL
+
+                    SELECT e.target_subreddit,
+                        t.path || e.target_subreddit,
+                        t.depth + 1
+                    FROM traversal t
+                    JOIN link_to_agg e ON e.source_subreddit = t.current
+                    WHERE e.sentiment > 0.33
+                    AND t.depth < %s
+                    AND NOT (e.target_subreddit = ANY(t.path))
+                )
+                SELECT path FROM traversal WHERE depth = %s LIMIT %s
+            """, (name, pattern_length, pattern_length, TRAVERSAL_LIMIT)).fetchall()
+        return _timed_match(run, subreddit_names)
 
     def __enter__(self):
         return self

@@ -9,9 +9,11 @@ from .base import (
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
+    TRAVERSAL_LIMIT,
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
+    _timed_match
 )
 
 INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched before
@@ -178,9 +180,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         edge_agg_records, _, _ = self._exec(
             "MATCH ()-[r:LINK_TO_AGG]->() RETURN count(r) AS c"
         )
-        edge_agg_count = edge_agg_records[0][
-            "c"
-        ]  # fixed: was comparing the raw records list, not the count
+        edge_agg_count = edge_agg_records[0]["c"]
         if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
             raise BenchmarkImportError(
                 f"Neo4j import validation failed:\nexpected {EXPECTED_EDGE_AGG_COUNT} aggregated edges, got {edge_agg_count}"
@@ -199,14 +199,14 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def common_neighbour_match(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
-                """
-                MATCH (s:Subreddit {name: $name})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+                f"""
+                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
                 WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
-                    AND NOT EXISTS { (s)-[:LINK_TO_AGG]->(newFriend) }
-                    AND NOT EXISTS { (newFriend)-[:LINK_TO_AGG]->(s) }
+                    AND NOT EXISTS {{ (s)-[:LINK_TO_AGG]->(newFriend) }}
+                    AND NOT EXISTS {{ (newFriend)-[:LINK_TO_AGG]->(s) }}
                 RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY delta_interest DESC
-                LIMIT 100
+                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
@@ -223,12 +223,21 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                 WHERE all(r IN relationships(p) WHERE r.sentiment {op})
                 AND a <> b
                 RETURN p
-                LIMIT 500
+                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
 
         return _timed_per_input(run, subreddit_names)
+
+    def friends_of_friends(self, subreddit_names: list[str]):
+        def run(name: str, pattern_length: int):
+            return self._exec(f"""
+                MATCH p = ACYCLIC (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->{{{pattern_length}}}(friend:Subreddit)
+                WHERE all(r IN relationships(p) WHERE r.sentiment > 0.33)
+                RETURN p LIMIT {TRAVERSAL_LIMIT}
+            """, name=name)
+        return _timed_match(run, subreddit_names)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
