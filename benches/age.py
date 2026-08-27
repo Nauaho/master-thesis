@@ -18,6 +18,7 @@ from .base import (
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
     TRAVERSAL_LIMIT,
+    FRIENDS_OF_FRIENDS_SENTIMENT
 )
 
 
@@ -754,7 +755,7 @@ class AGEBenchmark(GraphBenchmarks):
                 UNWIND relationships(p) AS r
                 WITH p, min(r.sentiment) AS min_sentiment
 
-                WHERE min_sentiment > 0.33
+                WHERE min_sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
 
                 UNWIND nodes(p) AS n
                 WITH p, count(DISTINCT n) AS distinct_node_count

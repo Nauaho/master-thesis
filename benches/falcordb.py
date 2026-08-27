@@ -15,6 +15,7 @@ from .base import (
     EXPECTED_EDGE_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    FRIENDS_OF_FRIENDS_SENTIMENT,
     TRAVERSAL_LIMIT
 )
 
@@ -193,7 +194,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             return self._exec(
                 """
                 MATCH (s:Subreddit) WHERE s.embedding IS NOT NULL
-                WITH s, vector.similarity.cosine(s.embedding, $queryVector) AS score
+                WITH s, vector.similarity.cosine(s.embedding, vecf32($queryVector)) AS score
                 RETURN s.name, score ORDER BY score DESC LIMIT $k
             """,
                 queryVector=vec,
@@ -216,13 +217,11 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         def run_query(vec: list[float]):
             return self._exec(
-                """
-                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', $k, $queryVector)
+            f"""
+                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', {k}, vecf32({vec}))
                 YIELD node, score
                 RETURN node.name, score
-            """,
-                queryVector=vec,
-                k=int(k),
+            """
             )
 
         try:
@@ -294,7 +293,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         def run(name: str, pattern_length: int):
             return self._exec(f"""
                 MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
-                WHERE all(r IN relationships(p) WHERE r.sentiment > 0.33)
+                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
                 AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
                 RETURN p LIMIT {TRAVERSAL_LIMIT}
             """, name=name)

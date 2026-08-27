@@ -10,6 +10,7 @@ from .base import (
     EXPECTED_EDGE_AGG_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
     TRAVERSAL_LIMIT,
+    FRIENDS_OF_FRIENDS_SENTIMENT,
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
@@ -234,7 +235,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         def run(name: str, pattern_length: int):
             return self._exec(f"""
                 MATCH p = ACYCLIC (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->{{{pattern_length}}}(friend:Subreddit)
-                WHERE all(r IN relationships(p) WHERE r.sentiment > 0.33)
+                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
                 RETURN p LIMIT {TRAVERSAL_LIMIT}
             """, name=name)
         return _timed_match(run, subreddit_names)

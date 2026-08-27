@@ -13,6 +13,7 @@ EXPECTED_EMBEDDED_NODE_COUNT = 51_269
 EXPECTED_EDGE_AGG_COUNT = 339_643
 EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET = 67_180
 
+FRIENDS_OF_FRIENDS_SENTIMENT = 0.5
 MATCH_AGG_MAX = 5
 TRAVERSAL_LIMIT = 500
 GRAPH_QUERY_SUBREDDITS = [
@@ -23,22 +24,6 @@ GRAPH_QUERY_SUBREDDITS = [
     "conspiracy",
 ]
 LINKS_CATEGORIES = ("positive", "negative")
-
-RESULTS_FILE = Path("benchmark_results.jsonl")
-
-
-def _log_result(function_name: str, result, metadata=None):
-    record = {
-        "function": function_name,
-        "result": result,
-    }
-
-    if metadata:
-        record.update(metadata)
-
-    with RESULTS_FILE.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, default=str) + "\n")
-
 
 @dataclass
 class BenchMarkResult:
@@ -75,17 +60,9 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
     times = []
     for i in range(n):
         start = time.perf_counter()
-        result = func()
+        func()
         elapsed = time.perf_counter() - start
         times.append(elapsed)
-        _log_result(
-            func.__name__,
-            result,
-            {
-                "run": i + 1,
-                "elapsed_seconds": elapsed,
-            },
-        )
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
@@ -95,20 +72,11 @@ def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResu
 def _timed_per_input(func, inputs: list) -> BenchMarkResult:
     """One rep per distinct input."""
     times = []
-    for i, item in enumerate(inputs):
+    for item in inputs:
         start = time.perf_counter()
-        result = func(item)
+        func(item)
         elapsed = time.perf_counter() - start
         times.append(elapsed)
-        _log_result(
-            func.__name__,
-            result,
-            {
-                "input": item,
-                "run": i + 1,
-                "elapsed_seconds": elapsed,
-            },
-        )
     cold_run, *hot_runs = times
     return BenchMarkResult(
         cold_run=cold_run,
@@ -122,19 +90,11 @@ def _timed_index_build(
     cleanup: callable = None,
 ) -> BenchMarkResult:
     times = []
-    for i in range(n):
+    for _ in range(n):
         start = time.perf_counter()
-        result = func()
+        func()
         elapsed = time.perf_counter() - start
         times.append(elapsed)
-        _log_result(
-            func.__name__,
-            result,
-            {
-                "run": i + 1,
-                "elapsed_seconds": elapsed,
-            },
-        )
         if cleanup is not None:
             cleanup()
     cold_run, *hot_runs = times
@@ -156,18 +116,9 @@ def _timed_match(
         times = []
         for item in inputs:
             start = time.perf_counter()
-            result = func(item, k)
+            func(item, k)
             elapsed = time.perf_counter() - start
             times.append(elapsed)
-            _log_result(
-                func.__name__,
-                result,
-                {
-                    "input": item,
-                    "pattern_length": k,
-                    "elapsed_seconds": elapsed,
-                },
-            )
         cold_run, *hot_runs = times
         by_length[k] = BenchMarkResult(
             cold_run=cold_run,
@@ -193,8 +144,7 @@ class BaseBenchmarks(ABC):
 
     def perform_benchmark(self):
         try:
-            print("yay")
-            # self.import_data()
+            self.import_data()
         except BenchmarkImportError as e:
             print(f"[{self.db_name}] Import failed, skipping benchmarks: {e}")
             return

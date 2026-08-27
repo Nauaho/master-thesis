@@ -10,7 +10,8 @@ from .base import (
     EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
-    TRAVERSAL_LIMIT
+    TRAVERSAL_LIMIT,
+    FRIENDS_OF_FRIENDS_SENTIMENT
 )
 
 
@@ -241,29 +242,29 @@ class PostgresGraphBenchmark(GraphBenchmarks):
 
         return _timed_per_input(run, subreddit_names)
 
-    def friends_of_friends(self, subreddit_names: list[str], pattern_lengths: range):
-        def run(pattern_length: int, name: str):
-            return self._conn.execute("""
+    def friends_of_friends(self, subreddit_names: list[str]):
+        def run(name: str, pattern_length: int):
+            return self._conn.execute(f"""
                 WITH RECURSIVE traversal AS (
-                    SELECT target_subreddit AS current,
-                        ARRAY[source_subreddit, target_subreddit] AS path,
+                    SELECT target_id AS current,
+                        ARRAY[source_id, target_id] AS path,
                         1 AS depth
-                    FROM link_to_agg
-                    WHERE source_subreddit = %s AND sentiment > 0.33
+                    FROM link_to_agg l INNER JOIN subreddit s ON l.source_id = s.id
+                    WHERE s.name = '{name}' AND sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
 
                     UNION ALL
 
-                    SELECT e.target_subreddit,
-                        t.path || e.target_subreddit,
+                    SELECT e.target_id,
+                        t.path || e.target_id,
                         t.depth + 1
                     FROM traversal t
-                    JOIN link_to_agg e ON e.source_subreddit = t.current
-                    WHERE e.sentiment > 0.33
-                    AND t.depth < %s
-                    AND NOT (e.target_subreddit = ANY(t.path))
+                    INNER JOIN link_to_agg e ON e.source_id = t.current
+                    WHERE e.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
+                    AND t.depth < {pattern_length}
+                    AND NOT (e.target_id = ANY(t.path))
                 )
-                SELECT path FROM traversal WHERE depth = %s LIMIT %s
-            """, (name, pattern_length, pattern_length, TRAVERSAL_LIMIT)).fetchall()
+                SELECT path FROM traversal WHERE depth = {pattern_length} LIMIT {TRAVERSAL_LIMIT}
+            """).fetchall()
         return _timed_match(run, subreddit_names)
 
     def __enter__(self):
