@@ -138,21 +138,21 @@ db_specs = [
     #     wait_ready=wait_mongo_ready,
     #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
     # ),
-    DBSpec(
-        image=SURREAL,
-        internal_port=8000,
-        env={},
-        volumes={},
-        benchmark_cls=SurrealDBBenchmark,
-        wait_ready=wait_surrealdb_ready,
-        command=[
-            "/surreal",
-            "start",
-            "--user", "root",
-            "--unauthenticated",
-            "rocksdb://data/surreal.db",
-        ],
-    ),
+    # DBSpec(
+    #     image=SURREAL,
+    #     internal_port=8000,
+    #     env={},
+    #     volumes={},
+    #     benchmark_cls=SurrealDBBenchmark,
+    #     wait_ready=wait_surrealdb_ready,
+    #     command=[
+    #         "/surreal",
+    #         "start",
+    #         "--user", "root",
+    #         "--unauthenticated",
+    #         "rocksdb://data/surreal.db",
+    #     ],
+    # ),
     DBSpec(
         image=AGE,
         internal_port=5432,

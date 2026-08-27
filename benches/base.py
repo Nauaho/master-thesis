@@ -27,23 +27,21 @@ LINKS_CATEGORIES = ("positive", "negative")
 
 @dataclass
 class BenchMarkResult:
-    """For query-style ops where cache state matters — first rep is cold,
-    remaining reps are hot (cache-warmed)."""
-
-    cold_run: float
+    cold_run: float | None
     hot_runs: list[float] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def avg(self) -> float:
-        return float(np.mean(self.hot_runs))
+        return float(np.mean(self.hot_runs)) if self.hot_runs else float("nan")
 
     @property
     def std(self) -> float:
-        return float(np.std(self.hot_runs))
+        return float(np.std(self.hot_runs)) if self.hot_runs else float("nan")
 
     @property
     def runs(self) -> list[float]:
-        return [self.cold_run, *self.hot_runs]
+        return ([self.cold_run] if self.cold_run is not None else []) + self.hot_runs
 
 
 @dataclass
@@ -55,75 +53,64 @@ class MatchResult:
 
 
 def _timed_repeated(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
-    """Same query run n times identically — cold_run captures cache-miss cost,
-    hot_runs capture cache-warmed performance."""
-    times = []
-    for i in range(n):
-        start = time.perf_counter()
-        func()
-        elapsed = time.perf_counter() - start
-        times.append(elapsed)
-        if cleanup is not None:
-            cleanup()
+    times, errors = [], []
+    for _ in range(n):
+        try:
+            start = time.perf_counter()
+            func()
+            times.append(time.perf_counter() - start)
+        except Exception as e:
+            errors.append(str(e))
+        finally:
+            if cleanup is not None:
+                try:
+                    cleanup()
+                except Exception as e:
+                    errors.append(f"cleanup failed: {e}")
+    if not times:
+        return BenchMarkResult(cold_run=None, hot_runs=[], errors=errors)
     cold_run, *hot_runs = times
-    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs)
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs, errors=errors)
 
 
 def _timed_per_input(func, inputs: list) -> BenchMarkResult:
-    """One rep per distinct input."""
-    times = []
+    times, errors = [], []
     for item in inputs:
-        start = time.perf_counter()
-        func(item)
-        elapsed = time.perf_counter() - start
-        times.append(elapsed)
+        try:
+            start = time.perf_counter()
+            func(item)
+            times.append(time.perf_counter() - start)
+        except Exception as e:
+            errors.append(f"input={item!r}: {e}")
+    if not times:
+        return BenchMarkResult(cold_run=None, hot_runs=[], errors=errors)
     cold_run, *hot_runs = times
-    return BenchMarkResult(
-        cold_run=cold_run,
-        hot_runs=hot_runs,
-    )
+    return BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs, errors=errors)
 
 
-def _timed_index_build(
-    func,
-    n: int = 5,
-    cleanup: callable = None,
-) -> BenchMarkResult:
-    times = []
-    for _ in range(n):
-        start = time.perf_counter()
-        func()
-        elapsed = time.perf_counter() - start
-        times.append(elapsed)
-        if cleanup is not None:
-            cleanup()
-    cold_run, *hot_runs = times
-    return BenchMarkResult(
-        cold_run=cold_run,
-        hot_runs=hot_runs,
-    )
+def _timed_index_build(func, n: int = 5, cleanup: callable = None) -> BenchMarkResult:
+    # identical shape to _timed_repeated — kept separate per your existing naming convention
+    return _timed_repeated(func, n=n, cleanup=cleanup)
 
 
-def _timed_match(
-    func,
-    inputs: list[str],
-    max_range=MATCH_AGG_MAX,
-) -> MatchResult:
+def _timed_match(func, inputs: list[str], max_range: int) -> MatchResult:
     by_length = {}
     if max_range < 2:
-        return MatchResult()
+        return MatchResult(by_pattern_length={})
     for k in range(1, max_range + 1):
-        times = []
+        times, errors = [], []
         for item in inputs:
-            start = time.perf_counter()
-            func(item, k)
-            elapsed = time.perf_counter() - start
-            times.append(elapsed)
-        cold_run, *hot_runs = times
-        by_length[k] = BenchMarkResult(
-            cold_run=cold_run,
-            hot_runs=hot_runs,
-        )
+            try:
+                start = time.perf_counter()
+                func(item, k)
+                times.append(time.perf_counter() - start)
+            except Exception as e:
+                errors.append(f"input={item!r}, length={k}: {e}")
+        if times:
+            cold_run, *hot_runs = times
+        else:
+            cold_run, hot_runs = None, []
+        by_length[k] = BenchMarkResult(cold_run=cold_run, hot_runs=hot_runs, errors=errors)
     return MatchResult(by_pattern_length=by_length)
 
 class BenchmarkImportError(Exception):
