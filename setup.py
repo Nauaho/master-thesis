@@ -109,34 +109,34 @@ db_specs = [
     #     },
     #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     #     ),
-    # DBSpec(
-    #     image=FALCOR,
-    #     internal_port=6379,
-    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-    #     benchmark_cls=FalkorDBBenchmark,
-    #     wait_ready=wait_falkordb_ready,
-    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-    #     command=["redis-server", "--maxmemory", "14gb"],
-    # ),
     DBSpec(
-        image=POSTGRES,
-        internal_port=5432,
-        env={"POSTGRES_PASSWORD": "password"},
-        volumes={
-            str(DATA_DIR): {"bind": "/import", "mode": "ro"},
-            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-        },
-        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
-        benchmark_cls=PostgresGraphBenchmark,   # not yet implemented
-        wait_ready=wait_postgres_sql_ready,
+        image=FALCOR,
+        internal_port=6379,
+        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+        benchmark_cls=FalkorDBBenchmark,
+        wait_ready=wait_falkordb_ready,
+        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+        command=["redis-server", "--maxmemory", "14gb"],
     ),
     # DBSpec(
-    #     image=MONGO,
-    #     internal_port=27017,
-    #     env={},
-    #     benchmark_cls=MongoBenchmark,
-    #     wait_ready=wait_mongo_ready,
-    #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
+        #     image=MONGO,
+        #     internal_port=27017,
+        #     env={},
+        #     benchmark_cls=MongoBenchmark,
+        #     wait_ready=wait_mongo_ready,
+        #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
+        # ),
+    # DBSpec(
+    #     image=POSTGRES,
+    #     internal_port=5432,
+    #     env={"POSTGRES_PASSWORD": "password"},
+    #     volumes={
+    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"},
+    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+    #     },
+    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+    #     benchmark_cls=PostgresGraphBenchmark,
+    #         wait_ready=wait_postgres_sql_ready,
     # ),
     # DBSpec(
     #     image=SURREAL,
@@ -146,30 +146,30 @@ db_specs = [
     #     benchmark_cls=SurrealDBBenchmark,
     #     wait_ready=wait_surrealdb_ready,
     #     command=[
-    #         "/surreal",
     #         "start",
     #         "--user", "root",
-    #         "--unauthenticated",
-    #         "rocksdb://data/surreal.db",
+    #         "--password", "root",
+    #         "rocksdb:///tmp/surreal.db",
     #     ],
     # ),
-    DBSpec(
-        image=AGE,
-        internal_port=5432,
-        env={"POSTGRES_PASSWORD": "password"},
-        volumes={
-            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-        },
-        command=[
-            "postgres",
-            "-c",
-            "config_file=/etc/postgresql/postgresql.conf",
-            "-c",
-            "shared_preload_libraries=age",
-        ],
-        benchmark_cls=AGEBenchmark,
-        wait_ready=wait_age_ready,
-    ),
+    # DBSpec(
+    #     image=AGE,
+    #     internal_port=5432,
+    #     env={"POSTGRES_PASSWORD": "password"},
+    #     volumes={
+    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+    #         str(DATA_DIR): {"bind": "/age/regress/age_load/data", "mode": "ro"}
+    #     },
+    #     command=[
+    #         "postgres",
+    #         "-c",
+    #         "config_file=/etc/postgresql/postgresql.conf",
+    #         "-c",
+    #         "shared_preload_libraries=age",
+    #     ],
+    #     benchmark_cls=AGEBenchmark,
+    #     wait_ready=wait_age_ready,
+    # ),
 ]
 
 
@@ -218,5 +218,5 @@ def run_all_benchmarks():
                 bench.perform_benchmark()
         finally:
             print("Check container")
-            container.stop()
-            container.remove(v=True)
+            # container.stop()
+            # container.remove(v=True)

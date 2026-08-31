@@ -77,6 +77,11 @@ class RedisBenchmark(VectorBenchmarks):
                     prefix=[DOC_PREFIX], index_type=IndexType.HASH
                 ),
             )
+            wait_for_hnsw_index(
+                self._r,
+                HNSW_INDEX,
+                interval=0.005,
+            )
 
         def drop():
             try:
@@ -150,6 +155,12 @@ class RedisBenchmark(VectorBenchmarks):
             definition=IndexDefinition(prefix=[DOC_PREFIX], index_type=IndexType.HASH),
         )
 
+        wait_for_hnsw_index(
+            self._r,
+            HNSW_INDEX,
+            interval=0.005,
+        )
+
         def run_query(vec):
             vec_bytes = np.array(vec, dtype=np.float32).tobytes()
             q = (
@@ -184,3 +195,43 @@ def wait_redis_ready(port: int, timeout: int = 60):
             last_err = e
             time.sleep(1)
     raise TimeoutError(f"redis not ready on port {port}") from last_err
+
+def wait_for_hnsw_index(
+    redis_client,
+    index_name: str,
+    interval: float = 0.010,
+    timeout: float = 600.0,
+):
+    """
+    Wait until a Redis/RediSearch HNSW index is fully constructed.
+
+    Polls FT.INFO every `interval` seconds.
+
+    Returns:
+        elapsed time in seconds from the first FT.INFO check
+        until the index reports 100% indexed and is no longer indexing.
+
+    Raises:
+        TimeoutError: if the index does not become ready within `timeout`.
+    """
+    start = time.perf_counter()
+    deadline = start + timeout
+
+    while True:
+        info = redis_client.ft(index_name).info()
+
+        indexing = int(info["indexing"])
+        percent_indexed = float(info["percent_indexed"])
+
+        if indexing == 0 and percent_indexed >= 1.0:
+            return time.perf_counter() - start
+
+        if time.perf_counter() >= deadline:
+            raise TimeoutError(
+                f"Redis HNSW index '{index_name}' did not finish "
+                f"within {timeout:.1f}s "
+                f"(indexing={indexing}, "
+                f"percent_indexed={percent_indexed:.4f})"
+            )
+
+        time.sleep(interval)

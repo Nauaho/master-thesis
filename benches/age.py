@@ -32,11 +32,11 @@ INPUT_FILES = [
 
 class AGEBenchmark(GraphBenchmarks):
     def __init__(self, port: int):
-        self._port = 45755
+        self._port = 5432
 
         self._conn = psycopg.connect(
             host="localhost",
-            port=45755,
+            port=port,
             dbname="postgres",
             user="postgres",
             password="password",
@@ -47,11 +47,10 @@ class AGEBenchmark(GraphBenchmarks):
         self._conn.execute("LOAD 'age'")
         self._conn.execute('SET search_path = ag_catalog, "$user", public')
 
-        # try:
-        #     self._conn.execute(f"SELECT create_graph('{GRAPH_NAME}')")
-        # except psycopg.errors.UniqueViolation:
-        #     # Graph already exists.
-        #     pass
+        try:
+            self._conn.execute(f"SELECT create_graph('{GRAPH_NAME}')")
+        except psycopg.errors.UniqueViolation:
+            pass
 
         self.db_name = "age"
 
@@ -81,7 +80,7 @@ class AGEBenchmark(GraphBenchmarks):
     # AGEFreighter import
     # ------------------------------------------------------------------
 
-    def _prepare_agefreighter_data(
+    def prepare_agefreighter_data(
         self,
         output_dir: Path,
     ) -> tuple[Path, int, int]:
@@ -143,14 +142,6 @@ class AGEBenchmark(GraphBenchmarks):
 
         print(f"Found {len(subreddits):,} unique subreddits")
 
-        # --------------------------------------------------------------
-        # Assign deterministic numeric IDs.
-        #
-        # IMPORTANT:
-        # AGEFreighter's graph input IDs are logical IDs from the CSV.
-        # We use integers here and keep the subreddit name as a property.
-        # --------------------------------------------------------------
-
         ordered_subreddits = sorted(subreddits)
 
         subreddit_to_id = {
@@ -160,10 +151,6 @@ class AGEBenchmark(GraphBenchmarks):
                 start=1,
             )
         }
-
-        # --------------------------------------------------------------
-        # Write vertex CSV.
-        # --------------------------------------------------------------
 
         nodes_path = output_dir / "subreddits.csv"
 
@@ -188,16 +175,6 @@ class AGEBenchmark(GraphBenchmarks):
                         name,
                     ]
                 )
-
-        # --------------------------------------------------------------
-        # Write edge CSV.
-        #
-        # We deliberately combine body + title into ONE LINK_TO edge
-        # type, exactly as the original importer did.
-        #
-        # Every original row becomes one edge.
-        # Therefore duplicate source/target pairs are preserved.
-        # --------------------------------------------------------------
 
         edges_path = output_dir / "links.csv"
 
@@ -254,12 +231,6 @@ class AGEBenchmark(GraphBenchmarks):
                         edge_id += 1
 
         edge_count = edge_id - 1
-
-        # --------------------------------------------------------------
-        # AGEFreighter config.
-        #
-        # One node type + one edge type.
-        # --------------------------------------------------------------
 
         config_path = output_dir / "config.json"
 
@@ -518,10 +489,6 @@ class AGEBenchmark(GraphBenchmarks):
 
         return node_count, edge_count
 
-    # ------------------------------------------------------------------
-    # Public import
-    # ------------------------------------------------------------------
-
     def import_data(self):
         """
         Import the Reddit dataset using AGEFreighter.
@@ -542,31 +509,14 @@ class AGEBenchmark(GraphBenchmarks):
         """
         try:
             print("=== AGE Reddit import ===")
+                
+            self._conn.execute(f"""
+            load_labels_from_file('{GRAPH_NAME}', 'Subreddit', age/regress/age_load/data/subreddits.csv)
+            """)
+            self._conn.execute(f"""
+            load_labels_from_file('{GRAPH_NAME}', 'LINK_TO', age/regress/age_load/data/links.csv)
+            """)
 
-            with tempfile.TemporaryDirectory(prefix="age_reddit_") as temp_dir:
-                temp_path = Path(temp_dir)
-
-                print(f"Preparing AGEFreighter data in {temp_path}")
-
-                (
-                    config_path,
-                    expected_nodes,
-                    expected_edges,
-                ) = self._prepare_agefreighter_data(temp_path)
-
-                print()
-                print(f"Expected nodes: {expected_nodes:,}")
-                print(f"Expected edges: {expected_edges:,}")
-                print()
-
-                # Bulk import.
-                self._run_agefreighter(config_path)
-
-            # CSV files are no longer needed after AGEFreighter exits.
-            print()
-            print("AGEFreighter import complete.")
-
-            # Index only after bulk loading.
             self._create_indexes()
 
             # Update planner statistics.
@@ -581,15 +531,11 @@ class AGEBenchmark(GraphBenchmarks):
         except Exception as e:
             raise BenchmarkImportError(f"AGE import failed: {e}") from e
 
-    # ------------------------------------------------------------------
-    # Aggregation
-    # ------------------------------------------------------------------
-
     def persist_aggregation(self):
         self._exec(
             """
             MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
-            WITH s, t, avg(toFloat(r.sentimentScore)) AS avgSentiment, count(r) AS linkCount
+            WITH s, t, avg(r.sentimentScore) AS avgSentiment, count(r) AS linkCount
             CREATE (s)-[agg:LINK_TO_AGG]->(t)
             SET
                 agg.sentiment = avgSentiment,
@@ -710,8 +656,6 @@ class AGEBenchmark(GraphBenchmarks):
                 RETURN newFriend.name, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY
                     delta_interest DESC
-
-                LIMIT {TRAVERSAL_LIMIT}
                 """,
                 out_cols=("newFriend agtype, delta_interest agtype"),
             )
@@ -734,7 +678,6 @@ class AGEBenchmark(GraphBenchmarks):
                 MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
                 WHERE r1.sentiment {op} AND r2.sentiment {op} AND r3.sentiment {op} AND a <> b
                 RETURN p
-                LIMIT {TRAVERSAL_LIMIT}
                 """,
                 out_cols="p agtype",
             )
@@ -748,31 +691,15 @@ class AGEBenchmark(GraphBenchmarks):
         def run(name: str, pattern_length: int):
             return self._exec(
                 f"""
-                MATCH p =
-                    (s:Subreddit {{name: '{self._escape(name)}' }})
-                    -[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
-
-                UNWIND relationships(p) AS r
-                WITH p, min(r.sentiment) AS min_sentiment
-
-                WHERE min_sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
-
-                UNWIND nodes(p) AS n
-                WITH p, count(DISTINCT n) AS distinct_node_count
-
-                WHERE distinct_node_count = {pattern_length + 1}
-
-                RETURN p
-                LIMIT {TRAVERSAL_LIMIT}
+                 MATCH p = (s:Subreddit {{name: '{name}'}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
+                                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
+                                AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
+                                RETURN p
                 """,
                 out_cols="p agtype",
             )
 
         return _timed_match(run, subreddit_names)
-
-    # ------------------------------------------------------------------
-    # Context manager
-    # ------------------------------------------------------------------
 
     def __enter__(self):
         return self

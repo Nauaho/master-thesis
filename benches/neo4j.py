@@ -23,7 +23,7 @@ INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched
 class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def __init__(self, port: int):
         self._driver = GraphDatabase.driver(
-            f"bolt://localhost:{port}", auth=("neo4j", "password")
+            f"bolt://localhost:{7687}", auth=("neo4j", "password")
         )
         self.db_name = "neo4j"
 
@@ -200,14 +200,13 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def common_neighbour_match(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
-                f"""
-                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
-                WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
+                """
+                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG WHERE r1.sentiment > 0.33]->(common:Subreddit)<-[r2:LINK_TO_AGG WHERE r2.sentiment > 0.33]-(newFriend:Subreddit)
+                WHERE s <> newFriend
                     AND NOT EXISTS {{ (s)-[:LINK_TO_AGG]->(newFriend) }}
                     AND NOT EXISTS {{ (newFriend)-[:LINK_TO_AGG]->(s) }}
                 RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY delta_interest DESC
-                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
@@ -220,11 +219,9 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         def run(name: str):
             return self._exec(
                 f"""
-                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
-                WHERE all(r IN relationships(p) WHERE r.sentiment {op})
-                AND a <> b
+                MATCH p = (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG WHERE r1.sentiment {op}]->(a:Subreddit)-[r2:LINK_TO_AGG WHERE r2.sentiment {op}]->(b:Subreddit)-[r3:LINK_TO_AGG WHERE r3.sentiment {op}]->(s)
+                WHERE a <> b
                 RETURN p
-                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
@@ -234,9 +231,8 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def friends_of_friends(self, subreddit_names: list[str]):
         def run(name: str, pattern_length: int):
             return self._exec(f"""
-                MATCH p = ACYCLIC (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->{{{pattern_length}}}(friend:Subreddit)
-                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
-                RETURN p LIMIT {TRAVERSAL_LIMIT}
+                MATCH p = ACYCLIC (s:Subreddit {{name: $name}})-[r:LINK_TO_AGG WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}]->{{{pattern_length}}}(friend:Subreddit)
+                RETURN p
             """, name=name)
         return _timed_match(run, subreddit_names)
 
@@ -307,7 +303,7 @@ def wait_neo4j_ready(port: int, timeout: int = 60):
     while time.time() < deadline:
         try:
             driver = GraphDatabase.driver(
-                f"bolt://localhost:{port}", auth=("neo4j", "password")
+                f"bolt://localhost:{7687}", auth=("neo4j", "password")
             )
             driver.verify_connectivity()
             driver.close()

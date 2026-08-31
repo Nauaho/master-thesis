@@ -2,7 +2,7 @@
 import time
 import csv
 from datetime import datetime
-from falkordb import FalkorDB
+from falkordb import FalkorDB, Graph
 from .base import (
     GraphBenchmarks,
     VectorBenchmarks,
@@ -179,26 +179,29 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
     def hnsw_index_build(self):
         def build():
-            self._exec(f"""
-                CREATE VECTOR INDEX FOR (n:Subreddit) ON (n.embedding)
-                OPTIONS {{dimension: {VECTOR_DIM}, similarityFunction: 'cosine'}}
-            """)
-
+            self._graph.create_node_vector_index('Subreddit', 'embedding', dim=VECTOR_DIM, similarity_function='cosine')
+            wait_for_hnsw_index(
+                self._graph,
+                label="Subreddit",
+                property_name="embedding",
+                interval=0.005,
+            )
         def drop():
-            self._exec("DROP VECTOR INDEX FOR (n:Subreddit) ON (n.embedding)")
+            self._graph.drop_node_vector_index(label='Subreddit', attribute='embedding')
+            time.sleep(10)
 
         return _timed_index_build(build, n=5, cleanup=drop)
 
     def knn(self, query_vectors: dict, k: int = 10):
-        def run_query(vec):
+        def run_query(vec: list[float]):
             return self._exec(
+                f"""
+                MATCH (e:Subreddit)
+                WHERE e.embedding IS NOT NULL 
+                RETURN e.name, vec.cosineDistance(e.embedding, vecf32({str(vec)})) AS cos_distance
+                ORDER BY cos_distance ASC
+                LIMIT {k}
                 """
-                MATCH (s:Subreddit) WHERE s.embedding IS NOT NULL
-                WITH s, vector.similarity.cosine(s.embedding, vecf32($queryVector)) AS score
-                RETURN s.name, score ORDER BY score DESC LIMIT $k
-            """,
-                queryVector=vec,
-                k=k,
             )
 
         return _timed_per_input(run_query, inputs=list(query_vectors.values()))
@@ -210,19 +213,34 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         if index_type != "hnsw":
             raise ValueError(f"Unknown index_type: {index_type}")
 
-        self._exec(f"""
-            CREATE VECTOR INDEX FOR (n:Subreddit) ON (n.embedding)
-            OPTIONS {{dimension: {VECTOR_DIM}, similarityFunction: 'cosine'}}
-        """)
+        self._exec("""
+            CREATE VECTOR INDEX FOR (n:Subreddit) ON (n.embedding) OPTIONS {dimension:$dim_count, similarityFunction:'cosine'}
+        """, dim_count=VECTOR_DIM)
+
+        wait_for_hnsw_index(
+            self._graph,
+            label="Subreddit",
+            property_name="embedding",
+            interval=0.005,
+        )
+
+        time.sleep(10)
+        print(
+            self._exec(
+                """
+                CALL db.indexes()
+                """
+            ).result_set
+        )
 
         def run_query(vec: list[float]):
             return self._exec(
-            f"""
-                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', {k}, vecf32({vec}))
+            """
+                CALL db.idx.vector.queryNodes('Subreddit', 'embedding', $k, vecf32($vec))
                 YIELD node, score
                 RETURN node.name, score
             """
-            )
+            , k=k, vec=vec)
 
         try:
             return _timed_per_input(run_query, inputs=list(query_vectors.values()))
@@ -259,7 +277,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     def common_neighbour_match(self, subreddit_names: list[str]):
         def run(name):
             return self._exec(
-                f"""
+                """
                 MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
                 WHERE r1.sentiment > 0.5 AND r2.sentiment > 0.5
                     AND s <> newFriend
@@ -267,7 +285,6 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                     AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
                 RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
                 ORDER BY delta_interest DESC
-                LIMIT {TRAVERSAL_LIMIT}
             """,
                 name=name,
             )
@@ -282,7 +299,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 f"""
                 MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
                 WHERE all(r IN relationships(p) WHERE r.sentiment {op}) AND a <> b
-                RETURN p LIMIT {TRAVERSAL_LIMIT}
+                RETURN p
             """,
                 name=name,
             )
@@ -295,7 +312,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
                 WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
                 AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
-                RETURN p LIMIT {TRAVERSAL_LIMIT}
+                RETURN p
             """, name=name)
         return _timed_match(run, subreddit_names)
 
@@ -319,3 +336,49 @@ def wait_falkordb_ready(port: int, timeout: int = 60):
             last_err = e
             time.sleep(1)
     raise TimeoutError(f"falkordb not ready on port {port}") from last_err
+
+def wait_for_hnsw_index(
+    graph: Graph,
+    label: str,
+    property_name: str,
+    interval: float = 0.010,
+    timeout: float = 600.0,
+):
+    """
+    Wait until a FalkorDB HNSW/vector index becomes operational.
+
+    Polls graph.list_indices() every `interval` seconds.
+
+    Raises:
+        TimeoutError: if the index does not become operational within
+                      `timeout` seconds.
+    """
+    deadline = time.perf_counter() + timeout
+
+    while True:
+        indices = graph.list_indices()
+
+        for index in indices.result_set:
+            index_label = index[0]
+            fields = index[1]
+            field_types = index[2]
+            status = index[7]
+
+            if (
+                index_label == label
+                and property_name in fields
+                and "VECTOR" in field_types.get(property_name, [])
+            ):
+                if status == "OPERATIONAL":
+                    return
+
+                break
+
+        if time.perf_counter() >= deadline:
+            raise TimeoutError(
+                f"FalkorDB HNSW index "
+                f"'{label}.{property_name}' did not become operational "
+                f"within {timeout:.1f}s"
+            )
+
+        time.sleep(interval)

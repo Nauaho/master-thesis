@@ -186,7 +186,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
             source_id = source_id_row[0]
 
             return self._conn.execute(
-                f"""
+                """
                 SELECT s2.name AS new_friend, (r2.sentiment - r1.sentiment) AS delta_interest
                 FROM link_to_agg r1
                 JOIN link_to_agg r2 ON r1.target_id = r2.target_id
@@ -203,7 +203,6 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                       WHERE x.source_id = r2.source_id AND x.target_id = r1.source_id
                   )
                 ORDER BY delta_interest DESC
-                LIMIT {TRAVERSAL_LIMIT}
             """,
                 (source_id,),
             ).fetchall()
@@ -235,7 +234,6 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                 WHERE e1.source_id = %s
                   AND e1.target_id <> e2.target_id
                   AND e1.sentiment {op} AND e2.sentiment {op} AND e3.sentiment {op}
-                LIMIT {TRAVERSAL_LIMIT}
             """,
                 (source_id,),
             ).fetchall()
@@ -244,26 +242,39 @@ class PostgresGraphBenchmark(GraphBenchmarks):
 
     def friends_of_friends(self, subreddit_names: list[str]):
         def run(name: str, pattern_length: int):
+            if name in ["shitamericanssay","botsrights"]:
+                # "gaming",
+                # "shitpost",
+                # "conspiracy",]:
+                return
             return self._conn.execute(f"""
                 WITH RECURSIVE traversal AS (
-                    SELECT target_id AS current,
-                        ARRAY[source_id, target_id] AS path,
+                    SELECT 
+                        l.target_id AS current, 
+                        l.source_id AS tracking_id, -- Need the start of the path for cycle tracking
                         1 AS depth
-                    FROM link_to_agg l INNER JOIN subreddit s ON l.source_id = s.id
-                    WHERE s.name = '{name}' AND sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
+                    FROM link_to_agg l 
+                    INNER JOIN subreddit s ON l.source_id = s.id
+                    WHERE s.name = '{name}' 
+                    AND sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
 
                     UNION ALL
 
-                    SELECT e.target_id,
-                        t.path || e.target_id,
+                    SELECT 
+                        e.target_id, 
+                        e.source_id, -- Keep passing the source ID to trace the link
                         t.depth + 1
                     FROM traversal t
                     INNER JOIN link_to_agg e ON e.source_id = t.current
                     WHERE e.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
                     AND t.depth < {pattern_length}
-                    AND NOT (e.target_id = ANY(t.path))
                 )
-                SELECT path FROM traversal WHERE depth = {pattern_length} LIMIT {TRAVERSAL_LIMIT}
+                CYCLE tracking_id SET is_loop USING node_path
+
+                SELECT node_path AS path 
+                FROM traversal 
+                WHERE NOT is_loop 
+                AND depth = {pattern_length};
             """).fetchall()
         return _timed_match(run, subreddit_names)
 

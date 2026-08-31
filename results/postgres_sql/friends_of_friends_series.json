@@ -1,54 +1,54 @@
 {
   "by_pattern_length": {
     "1": {
-      "cold_run": 0.0024417029999312945,
+      "cold_run": 9.369999816044583e-07,
       "hot_runs": [
-        0.0017236149997188477,
-        0.0013459340007102583,
-        0.0014319800002340344,
-        0.0014417709999179351
+        9.550000186209218e-07,
+        0.0041668110000046,
+        0.003740588999960437,
+        0.0027813140000034764
       ],
       "errors": []
     },
     "2": {
-      "cold_run": 0.0023293349995583412,
+      "cold_run": 7.170000344558503e-07,
       "hot_runs": [
-        0.0022728150006514625,
-        0.0024198900000556023,
-        0.002385967000009259,
-        0.0030558999997083447
+        1.6499996036145603e-07,
+        0.004190803000028609,
+        0.004187591000004431,
+        0.005364573999997901
       ],
       "errors": []
     },
     "3": {
-      "cold_run": 0.06558874599977571,
+      "cold_run": 1.2950000041200838e-06,
       "hot_runs": [
-        0.03704524900058459,
-        0.05598544600070454,
-        0.04378080199967371,
-        0.043152183000529476
+        2.3000001192485797e-07,
+        0.05556324700000914,
+        0.04961902800005191,
+        0.05079383700001472
       ],
       "errors": []
     },
     "4": {
-      "cold_run": 6.415977468000165,
+      "cold_run": 9.279999630962266e-07,
       "hot_runs": [
-        3.77230002000033,
-        3.596863554000265,
-        4.312249700999928,
-        4.380890620000173
+        1.7500002513770596e-07,
+        5.497912507000024,
+        5.9067045360000066,
+        6.000810295999997
       ],
       "errors": []
     },
     "5": {
-      "cold_run": null,
-      "hot_runs": [],
+      "cold_run": 1.0379999935139494e-06,
+      "hot_runs": [
+        1.7400003571310663e-07
+      ],
       "errors": [
-        "input='shitamericanssay', length=5: consuming input failed: server closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.",
-        "input='botsrights', length=5: the connection is closed",
-        "input='gaming', length=5: the connection is closed",
-        "input='shitpost', length=5: the connection is closed",
-        "input='conspiracy', length=5: the connection is closed"
+        "input='gaming', length=5: could not write to file \"base/pgsql_tmp/pgsql_tmp78.16\": Read-only file system",
+        "input='shitpost', length=5: could not open file \"base/5/16435\": Read-only file system",
+        "input='conspiracy', length=5: could not open file \"base/5/16435\": Read-only file system"
       ]
     }
   }

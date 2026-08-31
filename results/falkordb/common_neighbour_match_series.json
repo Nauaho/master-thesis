@@ -1,9 +1,11 @@
 {
-  "cold_run": 0.16802270700009103,
-  "hot_runs": [
-    0.07989399000007325,
-    0.12332378700011759,
-    0.13891752900008214,
-    0.12034012599997368
+  "cold_run": null,
+  "hot_runs": [],
+  "errors": [
+    "input='shitamericanssay': errMsg: Invalid input '{': expected a property name or '}' line: 1, column: 21, offset: 20 errCtx: MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2... errCtxOffset: 20",
+    "input='botsrights': errMsg: Invalid input '{': expected a property name or '}' line: 1, column: 21, offset: 20 errCtx: MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2... errCtxOffset: 20",
+    "input='gaming': errMsg: Invalid input '{': expected a property name or '}' line: 1, column: 21, offset: 20 errCtx: MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2... errCtxOffset: 20",
+    "input='shitpost': errMsg: Invalid input '{': expected a property name or '}' line: 1, column: 21, offset: 20 errCtx: MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2... errCtxOffset: 20",
+    "input='conspiracy': errMsg: Invalid input '{': expected a property name or '}' line: 1, column: 21, offset: 20 errCtx: MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2... errCtxOffset: 20"
   ]
 }

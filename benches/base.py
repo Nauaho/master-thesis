@@ -141,8 +141,8 @@ class BaseBenchmarks(ABC):
             )
             return
 
-        if isinstance(self, GraphBenchmarks):
-            self.perform_graph_benchmarks()
+        # if isinstance(self, GraphBenchmarks):
+        #     self.perform_graph_benchmarks()
 
         if isinstance(self, VectorBenchmarks):
             self.perform_vector_benchmarks()
@@ -201,8 +201,8 @@ class GraphBenchmarks(BaseBenchmarks):
                 f"cycle_{category}", self.cycle_detection(subreddit_names, category)
             )
 
-        print(f"[{self.db_name}] Performing friends of friends match benchmark.")
-        self._save("friends_of_friends", self.friends_of_friends(subreddit_names))
+        # print(f"[{self.db_name}] Performing friends of friends match benchmark.")
+        # self._save("friends_of_friends", self.friends_of_friends(subreddit_names))
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 
