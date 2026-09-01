@@ -23,7 +23,7 @@ MONGO = "mongo:8.0.21"
 FALCOR = "falkordb/falkordb-server:v4.18.3-alpine"
 POSTGRES = "postgres:18.3-bookworm"
 AGE = "apache/age:release_PG18_1.7.0"
-SURREAL = "surrealdb/surrealdb:v3.0.5"
+SURREAL = "surrealdb/surrealdb:v3.2.4"
 REDIS = "redis:8.6.2-trixie"
 CHROMA = "chromadb/chroma:1.5.8"
 PGVECTOR = "pgvector/pgvector:0.8.6-pg18-trixie"
@@ -109,15 +109,15 @@ db_specs = [
     #     },
     #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     #     ),
-    DBSpec(
-        image=FALCOR,
-        internal_port=6379,
-        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-        benchmark_cls=FalkorDBBenchmark,
-        wait_ready=wait_falkordb_ready,
-        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-        command=["redis-server", "--maxmemory", "14gb"],
-    ),
+    # DBSpec(
+    #     image=FALCOR,
+    #     internal_port=6379,
+    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+    #     benchmark_cls=FalkorDBBenchmark,
+    #     wait_ready=wait_falkordb_ready,
+    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+    #     command=["redis-server", "--maxmemory", "14gb"],
+    # ),
     # DBSpec(
         #     image=MONGO,
         #     internal_port=27017,
@@ -138,20 +138,20 @@ db_specs = [
     #     benchmark_cls=PostgresGraphBenchmark,
     #         wait_ready=wait_postgres_sql_ready,
     # ),
-    # DBSpec(
-    #     image=SURREAL,
-    #     internal_port=8000,
-    #     env={},
-    #     volumes={},
-    #     benchmark_cls=SurrealDBBenchmark,
-    #     wait_ready=wait_surrealdb_ready,
-    #     command=[
-    #         "start",
-    #         "--user", "root",
-    #         "--password", "root",
-    #         "rocksdb:///tmp/surreal.db",
-    #     ],
-    # ),
+    DBSpec(
+        image=SURREAL,
+        internal_port=8000,
+        env={},
+        volumes={},
+        benchmark_cls=SurrealDBBenchmark,
+        wait_ready=wait_surrealdb_ready,
+        command=[
+            "start",
+            "--user", "root",
+            "--password", "root",
+            "rocksdb:///tmp/surreal.db",
+        ],
+    ),
     # DBSpec(
     #     image=AGE,
     #     internal_port=5432,

@@ -2,8 +2,11 @@
 
 import time
 import csv
+import json
+from datetime import datetime, timezone
+import traceback
 
-from surrealdb import Surreal, RecordID
+from surrealdb import Surreal, RecordID, Datetime
 
 from .base import (
     GraphBenchmarks,
@@ -49,23 +52,8 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return False
 
-    def _exec(self, query, params=None):
+    def _exec(self, query, **params):
         return self._db.query(query, params)
-
-    def _scalar_count(self, query: str) -> int:
-        result = self._exec(query)
-
-        rows = (
-            result[0]["result"]
-            if isinstance(result[0], dict)
-            else result[0]
-        )
-
-        return rows[0]["c"] if rows else 0
-
-    # ------------------------------------------------------------------
-    # Schema
-    # ------------------------------------------------------------------
 
     def _define_schema(self):
         self._exec("""
@@ -132,45 +120,82 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 FIELDS sentiment;
         """)
 
-    # ------------------------------------------------------------------
-    # Import
-    # ------------------------------------------------------------------
-
     def import_data(self):
         try:
             self._define_schema()
-
             self._import_subreddits()
             self._import_links()
-            self._import_embeddings()
-
         except Exception as e:
-            raise BenchmarkImportError(
-                f"SurrealDB import failed: {e}"
-            ) from e
+            traceback.print_exc()
+            raise BenchmarkImportError(f"SurrealDB import failed: {e}") from e
 
         return self._validate_import()
 
-
-    def _import_subreddits(self, filename="data/reddit_agefreighter/subreddits.csv", batch_size=5000):
+    def _import_subreddits(
+        self,
+        filename="data/normalised_csvs/subreddits_full.csv",
+        batch_size=5000,
+    ):
         """
-        Import the complete, deduplicated subreddit list.
+        Import the complete subreddit dataset.
+
+        subreddits_full.csv contains the union of:
+        1. every subreddit appearing in the link datasets;
+        2. every subreddit appearing in the embedding dataset.
 
         CSV format:
-            id,name
-            32024,AskReddit
-            57106,gaming
-            ...
+
+            id,name,embedding
+
+        Example:
+
+            1,AskReddit,"[0.0123,-0.0456,...]"
+            2,gaming,""
+            3,programming,"[0.0012,0.0345,...]"
+
+        Every subreddit is imported exactly once.
+
+        The embedding column is optional because not every subreddit has
+        an embedding. When present, it is converted from its CSV string
+        representation into a list of floats before insertion.
         """
         with open(filename, "r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
+
             batch = []
 
             for row in reader:
-                batch.append({
+                record = {
                     "id": RecordID("subreddit", row["id"]),
                     "name": row["name"],
-                })
+                }
+
+                embedding_raw = row.get("embedding", "").strip()
+
+                if embedding_raw:
+                    try:
+                        embedding = json.loads(embedding_raw)
+
+                        if (
+                            not isinstance(embedding, list)
+                            or len(embedding) != EMBEDDING_DIMENSION
+                        ):
+                            raise ValueError(
+                                f"Expected {EMBEDDING_DIMENSION}-dimensional embedding"
+                            )
+                        
+                        vector = [float(value) for value in embedding]
+                        if(any(vector)):
+                            record["embedding"] = vector
+                        else:
+                            continue
+                    except (ValueError, SyntaxError) as exc:
+                        raise BenchmarkImportError(
+                            f"Invalid embedding for subreddit "
+                            f"{row['name']!r}: {embedding_raw!r}"
+                        ) from exc
+
+                batch.append(record)
 
                 if len(batch) >= batch_size:
                     self._insert_subreddit_batch(batch)
@@ -185,36 +210,61 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             """
             INSERT INTO subreddit $rows
             ON DUPLICATE KEY UPDATE
-                name = $input.name;
+                name = $input.name,
+                embedding = $input.embedding;
             """,
-            {"rows": rows},
+            rows=rows
         )
 
-
-    def _import_links(self, filename="data/reddit_agefreighter/links.csv", batch_size=5000):
+    def _import_links(
+        self,
+        filename="data/normalised_csvs/links.csv",
+        batch_size=5000,
+    ):
         """
         Import all graph edges.
 
         CSV format:
-            id,start_id,start_vertex_type,end_id,end_vertex_type,sentimentScore
 
-        Example:
-            1,32024,Subreddit,57106,Subreddit,1.0
+            id,start_id,start_vertex_type,end_id,end_vertex_type,
+            sentimentScore,post_id,timestamp,properties
 
-        The vertex type columns are currently ignored because this
-        benchmark uses only Subreddit -> Subreddit relations.
+        The vertex-type columns are ignored because this benchmark
+        contains only Subreddit -> Subreddit relations.
+
+        The properties column is converted from its CSV string
+        representation into a list of floats.
         """
         with open(filename, "r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
+
             batch = []
 
             for row in reader:
-                batch.append({
-                    "id": RecordID("link_to", row["id"]),
-                    "in": RecordID("subreddit", row["start_id"]),
-                    "out": RecordID("subreddit", row["end_id"]),
-                    "sentimentScore": float(row["sentimentScore"]),
-                })
+                properties_raw = row["properties"].strip()
+
+                try:
+                    properties = json.loads(properties_raw)
+                    properties = [float(value) for value in properties]
+                except (ValueError, SyntaxError, TypeError) as exc:
+                    raise BenchmarkImportError(
+                        f"Invalid properties for edge {row['id']}: "
+                        f"{properties_raw!r}"
+                    ) from exc
+
+                date = datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).isoformat()
+
+                batch.append(
+                    {
+                        "id": RecordID("link_to", row["id"]),
+                        "in": RecordID("subreddit", row["start_id"]),
+                        "out": RecordID("subreddit", row["end_id"]),
+                        "sentiment_score": float(row["sentimentScore"]),
+                        "post_id": row["post_id"],
+                        "timestamp": Datetime(date),
+                        "properties": properties,
+                    }
+                )
 
                 if len(batch) >= batch_size:
                     self._insert_link_batch(batch)
@@ -223,75 +273,24 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             if batch:
                 self._insert_link_batch(batch)
 
-
     def _insert_link_batch(self, rows):
-        self._run(
-            self._db.insert_relation("link_to", rows)
-        )
-
-
-    def _import_embeddings(
-        self,
-        filename="data/web-redditEmbeddings-subreddits.tsv",
-        batch_size=1000,
-    ):
-        """
-        Import subreddit embeddings.
-
-        CSV format:
-            subreddit_name,embedding_1,...,embedding_300
-        """
-        with open(filename, "r", encoding="utf-8", newline="") as f:
-            reader = csv.reader(f, delimiter='\t')
-            batch = []
-
-            for row in reader:
-                if len(row) < 2:
-                    continue
-
-                try:
-                    embedding = [float(x) for x in row[1:]]
-                except ValueError:
-                    continue
-
-                if len(embedding) != EMBEDDING_DIMENSION:
-                    continue
-
-                if not any(x != 0.0 for x in embedding):
-                    continue
-
-                batch.append({
-                    "id": RecordID("subreddit", row[0]),
-                    "name": row[0],
-                    "embedding": embedding,
-                })
-
-                if len(batch) >= batch_size:
-                    self._insert_embedding_batch(batch)
-                    batch.clear()
-
-            if batch:
-                self._insert_embedding_batch(batch)
-
-
-    def _insert_embedding_batch(self, rows):
         self._exec(
             """
-            INSERT INTO subreddit $rows
-            ON DUPLICATE KEY UPDATE
-                name = $input.name,
-                embedding = $input.embedding;
+            INSERT RELATION INTO link_to $rows;
             """,
-            {"rows": rows},
+            rows=rows
         )
 
     def _validate_import(self):
-        node_count = self._scalar_count("SELECT count() AS c FROM subreddit GROUP ALL;")
-        embedded_count = self._scalar_count(
-            "SELECT count() AS c FROM subreddit WHERE embedding IS NOT NONE GROUP ALL;"
-        )
-        edge_count = self._scalar_count("SELECT count() AS c FROM link_to GROUP ALL;")
+        result_nodes = self._exec("SELECT count() AS c FROM subreddit GROUP ALL;")
+        node_count = result_nodes[0]["c"] if result_nodes else 0
 
+        result_embedddings = self._exec("SELECT count() AS c FROM subreddit WHERE embedding IS NOT NONE GROUP ALL;")
+        embedded_count = result_embedddings[0]["c"] if result_embedddings else 0
+
+        result_edges = self._exec("SELECT count() AS c FROM link_to GROUP ALL;")
+        edge_count = result_edges[0]["c"] if result_edges else 0
+        
         errors = []
         if node_count != EXPECTED_NODE_COUNT:
             errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
@@ -300,30 +299,26 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         if edge_count != EXPECTED_EDGE_COUNT:
             errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
 
-        bad_length_count = self._scalar_count(f"""
+        # it is unsafe, idgaf
+        bad_length_count = self._exec(f"""
             SELECT count() AS c FROM subreddit
             WHERE embedding IS NOT NONE AND array::len(embedding) != {EMBEDDING_DIMENSION}
             GROUP ALL;
-        """)
+        """)[0]["c"]
         if bad_length_count != 0:
             errors.append(f"embedding dimension mismatch: {bad_length_count} node(s) affected")
 
-        null_element_count = self._scalar_count("""
+        null_element_count = self._exec("""
             SELECT count() AS c FROM subreddit
             WHERE embedding IS NOT NONE AND array::any(embedding, |$v| $v IS NONE)
             GROUP ALL;
-        """)
+        """)[0]["c"]
         if null_element_count != 0:
             errors.append(f"embedding contains null elements: {null_element_count} node(s) affected")
 
         if errors:
             raise BenchmarkImportError("SurrealDB import validation failed:\n" + "\n".join(errors))
         return node_count, embedded_count, edge_count
-
-
-    # ------------------------------------------------------------------
-    # Vector index lifecycle
-    # ------------------------------------------------------------------
 
     def hnsw_index_build(self):
         def build():
@@ -381,10 +376,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             cleanup=drop,
         )
 
-    # ------------------------------------------------------------------
-    # Aggregation
-    # ------------------------------------------------------------------
-
     def persist_aggregation(self):
         self._exec("""
             LET $pairs = SELECT
@@ -412,13 +403,13 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             """
         )
 
-        edge_agg_count = self._scalar_count(
+        edge_agg_count = self._exec(
             """
             SELECT count() AS c
             FROM link_to_agg
             GROUP ALL;
             """
-        )
+        )[0]["c"]
 
         if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
             raise BenchmarkImportError(
@@ -444,10 +435,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             run,
             n=5,
         )
-
-    # ------------------------------------------------------------------
-    # Graph traversal
-    # ------------------------------------------------------------------
 
     def common_neighbour_match(
         self,
@@ -617,18 +604,15 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     ):
         def run_query(vec):
             return self._exec(
-                """
+                f"""
                 SELECT
                     name,
                     vector::distance::knn() AS dist
                 FROM subreddit
                 WHERE embedding IS NOT NONE
-                  AND embedding <|$k, COSINE|> $vec;
+                  AND embedding <|{k}, COSINE|> $vec;
                 """,
-                {
-                    "vec": vec,
-                    "k": k,
-                },
+                vec=vec
             )
 
         return _timed_per_input(
@@ -646,7 +630,7 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             self._exec(
                 f"""
                 DEFINE INDEX OVERWRITE {INDEX_NAME}
-                ON TABLE subreddit
+                ON subreddit
                 FIELDS embedding
                 DISKANN
                 DIMENSION {EMBEDDING_DIMENSION}
@@ -673,19 +657,15 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         def run_query(vec):
             return self._exec(
-                """
+                f"""
                 SELECT
                     name,
                     vector::distance::knn() AS dist
                 FROM subreddit
-                WHERE embedding <|$k|> $vec;
+                WHERE embedding <|{k}, 50|> $vec;
                 """,
-                {
-                    "vec": vec,
-                    "k": k,
-                },
+                vec=vec
             )
-
         try:
             return _timed_per_input(
                 run_query,
