@@ -270,15 +270,15 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def friends_of_friends(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
-            """
-                MATCH (s:Subreddit {name: $name})
-                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)
+            f"""
+                MATCH (s:Subreddit {{name: $name}})
+                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){{1,{TRAVERSAL_LIMIT}}} (t)
 
                 WITH t, p,
                     length(p) AS hopDistance,
                     reduce(total = 0.0, rel IN relationships(p) | total + rel.sentiment) / length(p) AS avgPathSentiment
                 ORDER BY t.name, hopDistance ASC, avgPathSentiment DESC
-                WITH t, collect({path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment})[0] AS best
+                WITH t, collect({{path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment}})[0] AS best
 
                 RETURN t.name AS reachedSubreddit,
                     best.hopDistance AS hopDistance,
@@ -289,8 +289,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
             name=name, 
             minSentiment=FRIENDS_OF_FRIENDS_SENTIMENT,
             minLinkCount=MIN_LINKS_AGGREGATED, 
-            degreeCap=P99_DEGREE,
-            maxHops=TRAVERSAL_LIMIT
+            degreeCap=P99_DEGREE
             )
         return _timed_per_input(run, subreddit_names)
 

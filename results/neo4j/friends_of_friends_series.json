@@ -1,11 +1,10 @@
 {
-  "cold_run": null,
-  "hot_runs": [],
-  "errors": [
-    "input='minecraft': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='anime': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='socialism': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='the_donald': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='conspiracy': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}"
-  ]
+  "cold_run": 0.257351921999998,
+  "hot_runs": [
+    0.023645251000061762,
+    0.008740984000041863,
+    0.016125349000049027,
+    0.018829282000069725
+  ],
+  "errors": []
 }
