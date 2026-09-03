@@ -1,57 +1,11 @@
 {
-  "by_pattern_length": {
-    "1": {
-      "cold_run": 0.46184696699992855,
-      "hot_runs": [
-        0.29304324999975506,
-        0.5104295280002589,
-        0.3748074479999559,
-        0.3836269550001816
-      ],
-      "errors": []
-    },
-    "2": {
-      "cold_run": 61.45693352199987,
-      "hot_runs": [
-        31.323448266000014,
-        37.86896925800011,
-        36.149705182999696,
-        35.86801299400031
-      ],
-      "errors": []
-    },
-    "3": {
-      "cold_run": null,
-      "hot_runs": [],
-      "errors": [
-        "input='shitamericanssay', length=3: Connection closed by server.",
-        "input='botsrights', length=3: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='gaming', length=3: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='shitpost', length=3: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='conspiracy', length=3: Error while reading from localhost:45477 : (104, 'Connection reset by peer')"
-      ]
-    },
-    "4": {
-      "cold_run": null,
-      "hot_runs": [],
-      "errors": [
-        "input='shitamericanssay', length=4: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='botsrights', length=4: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='gaming', length=4: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='shitpost', length=4: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='conspiracy', length=4: Error while reading from localhost:45477 : (104, 'Connection reset by peer')"
-      ]
-    },
-    "5": {
-      "cold_run": null,
-      "hot_runs": [],
-      "errors": [
-        "input='shitamericanssay', length=5: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='botsrights', length=5: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='gaming', length=5: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='shitpost', length=5: Error while reading from localhost:45477 : (104, 'Connection reset by peer')",
-        "input='conspiracy', length=5: Error while reading from localhost:45477 : (104, 'Connection reset by peer')"
-      ]
-    }
-  }
+  "cold_run": null,
+  "hot_runs": [],
+  "errors": [
+    "input='minecraft': Query timed out",
+    "input='anime': Query timed out",
+    "input='socialism': Query timed out",
+    "input='the_donald': Query timed out",
+    "input='conspiracy': Query timed out"
+  ]
 }

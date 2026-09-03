@@ -20,7 +20,7 @@ PGTUNE_CONF = (Path(__file__).parent / "config" / "pgtune.conf").resolve()
 
 NEO4J = "neo4j:2026.04.0"
 MONGO = "mongo:8.0.21"
-FALCOR = "falkordb/falkordb-server:v4.18.3-alpine"
+FALCOR = "falkordb/falkordb-server:v4.20.4-alpine"
 POSTGRES = "postgres:18.3-bookworm"
 AGE = "apache/age:release_PG18_1.7.0"
 SURREAL = "surrealdb/surrealdb:v3.2.4"
@@ -65,22 +65,22 @@ class DBSpec:
 
 
 db_specs = [
-    DBSpec(
-        image=NEO4J,
-        internal_port=7687,
-        env={
-            "NEO4J_AUTH": "neo4j/password",
-            "NEO4J_dbms_directories_import": "/import",
-            "NEO4J_server_memory_heap_initial__size": "5g",
-            "NEO4J_server_memory_heap_max__size": "5g",
-            "NEO4J_server_memory_pagecache_size": "7g"
-        },
-        benchmark_cls=Neo4jBenchamrk,
-        wait_ready=wait_neo4j_ready,
-        volumes={
-            str(DATA_DIR): {"bind": "/import", "mode": "ro"}
-        },
-    ),
+    # DBSpec(
+    #     image=NEO4J,
+    #     internal_port=7687,
+    #     env={
+    #         "NEO4J_AUTH": "neo4j/password",
+    #         "NEO4J_dbms_directories_import": "/import",
+    #         "NEO4J_server_memory_heap_initial__size": "5g",
+    #         "NEO4J_server_memory_heap_max__size": "5g",
+    #         "NEO4J_server_memory_pagecache_size": "7g"
+    #     },
+    #     benchmark_cls=Neo4jBenchamrk,
+    #     wait_ready=wait_neo4j_ready,
+    #     volumes={
+    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"}
+    #     },
+    # ),
     # DBSpec(
     #     image=REDIS,
     #     internal_port=6379,
@@ -109,15 +109,15 @@ db_specs = [
     #     },
     #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     #     ),
-    # DBSpec(
-    #     image=FALCOR,
-    #     internal_port=6379,
-    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-    #     benchmark_cls=FalkorDBBenchmark,
-    #     wait_ready=wait_falkordb_ready,
-    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-    #     command=["redis-server", "--maxmemory", "14gb"],
-    # ),
+    DBSpec(
+        image=FALCOR,
+        internal_port=6379,
+        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+        benchmark_cls=FalkorDBBenchmark,
+        wait_ready=wait_falkordb_ready,
+        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+        command=["redis-server", "--maxmemory", "14gb"],
+    ),
     # DBSpec(
         #     image=MONGO,
         #     internal_port=27017,

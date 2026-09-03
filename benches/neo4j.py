@@ -18,7 +18,6 @@ from .base import (
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
-    _timed_match
 )
 
 INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched before
@@ -236,7 +235,6 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                     commonNeighborsCount, avgDeltaSentiment, adamicAdarScore,
                     adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
                 ORDER BY combinedScore DESC
-                LIMIT 50
             """,
                 name=name,
                 minSentiment=ADAMIC_AGAR_MIN_SENTIMENT,
@@ -259,7 +257,6 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                 MATCH (s)-[rev3:LINK_TO_AGG WHERE rev3.sentiment > $minSentiment]->(b)
                 RETURN p
                 ORDER BY reduce(total = 0.0, r IN relationships(p) | total + r.sentiment) DESC
-                LIMIT 100
             """,
                 name=name,
                 minSentiment=CYCLE_DETECTION_SENTIMENT
@@ -284,7 +281,6 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                     best.hopDistance AS hopDistance,
                     best.avgPathSentiment AS avgPathSentiment
                 ORDER BY hopDistance ASC, avgPathSentiment DESC
-                LIMIT 200
             """, 
             name=name, 
             minSentiment=FRIENDS_OF_FRIENDS_SENTIMENT,

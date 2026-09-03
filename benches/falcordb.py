@@ -10,13 +10,16 @@ from .base import (
     _timed_repeated,
     _timed_per_input,
     _timed_index_build,
-    _timed_match,
     EXPECTED_NODE_COUNT,
     EXPECTED_EDGE_COUNT,
-    EXPECTED_EMBEDDED_NODE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    EXPECTED_EMBEDDED_NODE_COUNT,
+    ADAMIC_AGAR_MIN_SENTIMENT,
+    CYCLE_DETECTION_SENTIMENT,
+    P99_DEGREE,
     FRIENDS_OF_FRIENDS_SENTIMENT,
-    TRAVERSAL_LIMIT
+    TRAVERSAL_LIMIT,
+    MIN_LINKS_AGGREGATED,
 )
 
 VECTOR_DIM = 300
@@ -30,6 +33,8 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         self._client = FalkorDB(host="localhost", port=port)
         self._graph = self._client.select_graph(GRAPH_NAME)
         self.db_name = "falkordb"
+        self._client.config_set("TIMEOUT_DEFAULT", 1800_000)
+        self._client.config_set("TIMEOUT_MAX", 1800_000)
 
     def _exec(self, query, **params):
         return self._graph.query(query, params=params)
@@ -256,6 +261,18 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         """)
 
         self._exec("CREATE INDEX FOR ()-[r:LINK_TO_AGG]-() ON (r.sentiment)")
+
+        self._exec("""
+            MATCH (s:Subreddit)
+            OPTIONAL MATCH (s)-[out:LINK_TO_AGG]->()
+            WITH s, count(out) AS outDeg
+            OPTIONAL MATCH (s)<-[inc:LINK_TO_AGG]-()
+            WITH s, outDeg, count(inc) AS inDeg
+            SET s.outDegree = outDeg, s.inDegree = inDeg, s.degree = outDeg + inDeg
+        """)
+
+        self._exec("CREATE INDEX FOR (s:Subreddit) ON (s.degree)")
+
         edge_agg_count = self._exec(
             "MATCH ()-[r:LINK_TO_AGG]->() RETURN count(r) AS c"
         ).result_set[0][0]
@@ -266,9 +283,10 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
     def aggregate_graph(self):
         def run():
-            return self._exec("""
+            return self._exec(
+            """
                 MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
-                RETURN s.name AS source, t.name AS target, sum(r.sentimentScore) AS sentiment, count(r) AS linkCount
+                RETURN s.name AS source, t.name AS target, avg(r.sentimentScore) AS sentiment, count(r) AS linkCount
                 ORDER BY sentiment DESC
             """)
 
@@ -277,44 +295,81 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     def adamic_adar(self, subreddit_names: list[str]):
         def run(name):
             return self._exec(
-                """
-                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
-                WHERE r1.sentiment > 0.5 AND r2.sentiment > 0.5
-                    AND s <> newFriend
-                    AND NOT (s)-[:LINK_TO_AGG]->(newFriend)
-                    AND NOT (newFriend)-[:LINK_TO_AGG]->(s)
-                RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
-                ORDER BY delta_interest DESC
+            """ 
+            MATCH (s:Subreddit {name: $name})
+            MATCH (s)-[r1:LINK_TO_AGG]->(common:Subreddit)
+            WHERE common.degree < $hubDegreeCap AND r1.sentiment > $minSentiment
+            MATCH (common)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+            WHERE r2.sentiment > $minSentiment AND s <> newFriend 
+                AND NOT (s)-[:LINK_TO_AGG]-(newFriend)
+            WITH newFriend, common, r1, r2
+            WITH newFriend,
+                COUNT(DISTINCT common) AS commonNeighborsCount,
+                AVG(abs(r1.sentiment - r2.sentiment)) AS avgDeltaSentiment,
+                SUM(1.0 / log(common.degree + 2)) AS adamicAdarScore
+            WHERE commonNeighborsCount >= 3
+            RETURN newFriend.name AS suggestedSubreddit,
+                commonNeighborsCount, avgDeltaSentiment, adamicAdarScore,
+                adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
+            ORDER BY combinedScore DESC
             """,
                 name=name,
+                hubDegreeCap=P99_DEGREE,
+                minSentiment=ADAMIC_AGAR_MIN_SENTIMENT
             )
 
         return _timed_per_input(run, subreddit_names)
 
-    def cycle_detection(self, subreddit_names: list[str], category: str = "positive"):
-        op = self._sentiment_op(category)
-
+    def cycle_detection(self, subreddit_names: list[str]):
         def run(name):
             return self._exec(
-                f"""
-                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG]->(a:Subreddit)-[:LINK_TO_AGG]->(b:Subreddit)-[:LINK_TO_AGG]->(s)
-                WHERE all(r IN relationships(p) WHERE r.sentiment {op}) AND a <> b
+                """
+                MATCH (s:Subreddit {name: $name})
+                MATCH p = (s)-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
+                WHERE r1.sentiment > $minSentiment AND r2.sentiment > $minSentiment AND r3.sentiment > $minSentiment
+                AND a <> b AND a.name < b.name
+                MATCH (a)-[rev1:LINK_TO_AGG]->(s)
+                MATCH (b)-[rev2:LINK_TO_AGG]->(a)
+                MATCH (s)-[rev3:LINK_TO_AGG]->(b)
+                WHERE rev1.sentiment > $minSentiment AND rev2.sentiment > $minSentiment AND rev3.sentiment > $minSentiment
                 RETURN p
+                ORDER BY reduce(total = 0.0, r IN relationships(p) | total + r.sentiment) DESC
             """,
-                name=name,
+                name=name, minSentiment=CYCLE_DETECTION_SENTIMENT
             )
 
         return _timed_per_input(run, subreddit_names)
 
     def friends_of_friends(self, subreddit_names: list[str]):
-        def run(name: str, pattern_length: int):
-            return self._exec(f"""
-                MATCH p = (s:Subreddit {{name: $name}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
-                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
-                AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
-                RETURN p
-            """, name=name)
-        return _timed_match(run, subreddit_names)
+        def run(name: str):
+            return self._exec(
+            f"""
+            MATCH (s:Subreddit {{name: $name}})
+            MATCH p = (s)-[:LINK_TO_AGG*1..{TRAVERSAL_LIMIT}]->(t:Subreddit)
+            WHERE ALL(n IN nodes(p)[1..] WHERE n.degree < $degreeCap) AND
+                ALL(rel IN relationships(p) WHERE rel.sentiment > $minSentiment AND rel.linkCount > $minLinkCount) 
+
+            WITH p, t, nodes(p) AS ns
+            UNWIND ns AS n
+            WITH p, t, ns, count(DISTINCT n) AS distinctCount, count(n) AS totalCount
+            WHERE distinctCount = totalCount
+
+            WITH t, p,
+                length(p) AS hopDistance,
+                reduce(total = 0.0, rel IN relationships(p) | total + rel.sentiment) / length(p) AS avgPathSentiment
+            ORDER BY t.name, hopDistance ASC, avgPathSentiment DESC
+            WITH t, collect({{path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment}})[0] AS best
+
+            RETURN t.name AS reachedSubreddit,
+                best.hopDistance AS hopDistance,
+                best.avgPathSentiment AS avgPathSentiment
+            ORDER BY hopDistance ASC, avgPathSentiment DESC
+            """, 
+            name=name,
+            minSentiment=FRIENDS_OF_FRIENDS_SENTIMENT,
+            minLinkCount=MIN_LINKS_AGGREGATED, 
+            degreeCap=P99_DEGREE)
+        return _timed_per_input(run, subreddit_names)
 
     def __enter__(self):
         return self

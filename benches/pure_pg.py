@@ -10,7 +10,11 @@ from .base import (
     EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
+    ADAMIC_AGAR_MIN_SENTIMENT,
+    CYCLE_DETECTION_SENTIMENT,
+    MIN_LINKS_AGGREGATED,
     TRAVERSAL_LIMIT,
+    P99_DEGREE,
     FRIENDS_OF_FRIENDS_SENTIMENT
 )
 
@@ -29,26 +33,38 @@ class PostgresGraphBenchmark(GraphBenchmarks):
 
     def import_data(self):
         try:
-            # Create subreddit (node) table
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS subreddit (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL UNIQUE
-                )
-            """)
+            # SCHEMA
+            self._conn.execute(
+                """
+                CREATE TABLE subreddits (
+                    id       BIGINT PRIMARY KEY,
+                    subreddit TEXT NOT NULL UNIQUE,
+                    degree   BIGINT NOT NULL
+                );
 
-            # Create normalized link_to table with foreign keys
-            self._conn.execute("""
-                CREATE TABLE IF NOT EXISTS link_to (
-                    id SERIAL PRIMARY KEY,
-                    source_id INTEGER NOT NULL REFERENCES subreddit(id),
-                    target_id INTEGER NOT NULL REFERENCES subreddit(id),
-                    post_id TEXT,
-                    ts TIMESTAMP,
-                    sentiment_score REAL,
-                    properties REAL[]
-                )
-            """)
+                CREATE TABLE links_to (
+                    id         BIGINT PRIMARY KEY,
+                    start      BIGINT NOT NULL REFERENCES subreddits(id),
+                    finish     BIGINT NOT NULL REFERENCES subreddits(id),
+                    sentiment  DOUBLE PRECISION NOT NULL
+                );
+
+                CREATE TABLE links_to_agg (
+                    id          BIGINT PRIMARY KEY,
+                    start       BIGINT NOT NULL REFERENCES subreddits(id),
+                    finish      BIGINT NOT NULL REFERENCES subreddits(id),
+                    sentiment   DOUBLE PRECISION NOT NULL,
+                    link_count  BIGINT NOT NULL
+                );
+                """)
+
+            self._conn.execute(
+                """
+                ALTER TABLE links_to_agg
+                ADD CONSTRAINT links_to_agg_start_finish_unique
+                UNIQUE (start, finish);
+                """
+            )
 
             # First pass: collect all unique subreddits
             all_subreddits = set()
@@ -66,14 +82,14 @@ class PostgresGraphBenchmark(GraphBenchmarks):
             with self._conn.cursor() as cur:
                 for subreddit_name in sorted(all_subreddits):
                     cur.execute(
-                        "INSERT INTO subreddit (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
+                        "INSERT INTO subreddits (name) VALUES (%s) ON CONFLICT (name) DO NOTHING",
                         (subreddit_name,),
                     )
 
             # Fetch the subreddit ID mapping
             subreddit_id_map = {}
             with self._conn.cursor() as cur:
-                cur.execute("SELECT id, name FROM subreddit")
+                cur.execute("SELECT id, name FROM subreddits")
                 for row in cur.fetchall():
                     subreddit_id_map[row[1]] = row[0]
 
@@ -86,7 +102,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                     reader = csv.DictReader(f, delimiter="\t")
                     with self._conn.cursor() as cur:
                         with cur.copy(
-                            "COPY link_to (source_id, target_id, post_id, ts, sentiment_score, properties) FROM STDIN"
+                            "COPY links_to (source_id, target_id, post_id, ts, sentiment_score, properties) FROM STDIN"
                         ) as copy:
                             for row in reader:
                                 source_id = subreddit_id_map[row["SOURCE_SUBREDDIT"]]
@@ -106,14 +122,16 @@ class PostgresGraphBenchmark(GraphBenchmarks):
                                 )
 
             self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_link_source ON link_to (source_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_link_target ON link_to (target_id)"
-            )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_link_group ON link_to (source_id, target_id)"
-            )
+            """
+            CREATE INDEX links_to_start_idx
+                ON links_to (start);
+
+            CREATE INDEX links_to_finish_idx
+                ON links_to (finish);
+
+            CREATE INDEX links_to_start_finish_idx
+                ON links_to (start, finish);
+            """)
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_subreddit_lookup ON subreddit (id)"
             )
@@ -152,8 +170,78 @@ class PostgresGraphBenchmark(GraphBenchmarks):
             FROM link_to
             GROUP BY source_id, target_id
         """)
-        self._conn.execute("CREATE INDEX ON link_to_agg (source_id)")
-        self._conn.execute("CREATE INDEX ON link_to_agg (target_id)")
+
+        self._conn.execute(
+            """
+            INSERT INTO links_to_agg (
+                id,
+                start,
+                finish,
+                sentiment,
+                link_count
+            )
+            SELECT
+                ROW_NUMBER() OVER (ORDER BY start, finish),
+                start,
+                finish,
+                AVG(sentiment),
+                COUNT(*)
+            FROM links_to
+            GROUP BY start, finish
+            ORDER BY start, finish;
+            """)
+
+        # indexes on id
+        self._conn.execute(
+        """
+        CREATE INDEX links_to_agg_start_idx
+            ON links_to_agg (start);
+
+        CREATE INDEX links_to_agg_finish_idx
+            ON links_to_agg (finish);
+
+        CREATE INDEX links_to_agg_start_finish_idx
+            ON links_to_agg (start, finish);
+        """)
+
+        self._conn.execute(
+        """
+        WITH degrees AS (
+            SELECT
+                s.id,
+                COALESCE(out_deg.degree, 0)
+                + COALESCE(in_deg.degree, 0) AS degree
+            FROM subreddits s
+            LEFT JOIN (
+                SELECT start, COUNT(*) AS degree
+                FROM links_to_agg
+                GROUP BY start
+            ) out_deg ON out_deg.start = s.id
+            LEFT JOIN (
+                SELECT finish, COUNT(*) AS degree
+                FROM links_to_agg
+                GROUP BY finish
+            ) in_deg ON in_deg.finish = s.id
+        )
+        UPDATE subreddits s
+        SET degree = d.degree
+        FROM degrees d
+        WHERE s.id = d.id;
+        """
+        )
+
+        # indexes on properties used in filtering
+        self._conn.execute(
+        """
+        CREATE INDEX links_to_agg_sentiment_idx
+            ON links_to_agg (sentiment);
+
+        CREATE INDEX links_to_agg_link_count_idx
+            ON links_to_agg (link_count);
+
+        CREATE INDEX subreddits_degree_idx
+            ON subreddits (degree);
+        """)
 
         edge_agg_count = self._conn.execute(
             "SELECT count(*) FROM link_to_agg"
@@ -165,11 +253,22 @@ class PostgresGraphBenchmark(GraphBenchmarks):
 
     def aggregate_graph(self):
         def run():
-            return self._conn.execute("""
-                SELECT source_id, target_id, sum(sentiment_score), count(*)
-                FROM link_to
-                GROUP BY source_id, target_id
-                ORDER BY sum(sentiment_score) DESC
+            return self._conn.execute(
+                """
+                SELECT
+                    s.subreddit AS source,
+                    t.subreddit AS target,
+                    AVG(l.sentiment) AS sentiment,
+                    COUNT(*) AS link_count
+                FROM links_to l
+                JOIN subreddits s ON s.id = l.start
+                JOIN subreddits t ON t.id = l.finish
+                GROUP BY
+                    s.id,
+                    s.subreddit,
+                    t.id,
+                    t.subreddit
+                ORDER BY sentiment DESC;
             """).fetchall()
 
         return _timed_repeated(run, n=5)
@@ -177,105 +276,171 @@ class PostgresGraphBenchmark(GraphBenchmarks):
     def adamic_adar(self, subreddit_names: list[str]):
         # First, get the IDs for the provided subreddit names
         def run(name: str):
-            # Get source subreddit ID
-            source_id_row = self._conn.execute(
-                "SELECT id FROM subreddit WHERE name = %s", (name,)
-            ).fetchone()
-            if not source_id_row:
-                return []
-            source_id = source_id_row[0]
-
             return self._conn.execute(
                 """
-                SELECT s2.name AS new_friend, (r2.sentiment - r1.sentiment) AS delta_interest
-                FROM link_to_agg r1
-                JOIN link_to_agg r2 ON r1.target_id = r2.target_id
-                JOIN subreddit s2 ON r2.source_id = s2.id
-                WHERE r1.source_id = %s
-                  AND r1.sentiment > 0.33 AND r2.sentiment > 0.33
-                  AND r2.source_id <> r1.source_id
-                  AND NOT EXISTS (
-                      SELECT 1 FROM link_to_agg x
-                      WHERE x.source_id = r1.source_id AND x.target_id = r2.source_id
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM link_to_agg x
-                      WHERE x.source_id = r2.source_id AND x.target_id = r1.source_id
-                  )
-                ORDER BY delta_interest DESC
-            """,
-                (source_id,),
+                SELECT
+                    nf.subreddit AS suggested_subreddit,
+                    COUNT(DISTINCT common.id) AS common_neighbors_count,
+                    AVG(ABS(r1.sentiment - r2.sentiment)) AS avg_delta_sentiment,
+                    SUM(
+                        1.0 / LN(common.degree + 2)
+                    ) AS adamic_adar_score
+                FROM subreddits s
+
+                JOIN links_to_agg r1
+                    ON r1.start = s.id
+                JOIN subreddits common
+                    ON common.id = r1.finish
+
+                JOIN links_to_agg r2
+                    ON r2.start = common.id
+                JOIN subreddits nf
+                    ON nf.id = r2.finish
+
+                WHERE s.subreddit = %s
+                AND r1.sentiment > %s
+                AND r2.sentiment > %s
+                AND common.degree < %s
+                AND nf.id <> s.id
+
+                -- not already connected
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM links_to_agg existing
+                    WHERE existing.start = s.id
+                        AND existing.finish = nf.id
+                )
+
+                GROUP BY nf.id, nf.subreddit
+
+                HAVING COUNT(DISTINCT common.id) >= 3
+
+                ORDER BY
+                    adamic_adar_score *
+                    (1 - AVG(ABS(r1.sentiment - r2.sentiment))) DESC;
+                """,
+                (name, ADAMIC_AGAR_MIN_SENTIMENT, ADAMIC_AGAR_MIN_SENTIMENT, P99_DEGREE),
             ).fetchall()
 
         return _timed_per_input(run, subreddit_names)
 
-    def cycle_detection(self, subreddit_names: list[str], category: str = "positive"):
-        op = self._sentiment_op(category)  # returns e.g. ">= 0" / "< 0"
+    def cycle_detection(self, subreddit_names: list[str]):
+        sentiment = CYCLE_DETECTION_SENTIMENT
 
         def run(name: str):
-            # Get source subreddit ID
-            source_id_row = self._conn.execute(
-                "SELECT id FROM subreddit WHERE name = %s", (name,)
-            ).fetchone()
-            if not source_id_row:
-                return []
-            source_id = source_id_row[0]
-
             return self._conn.execute(
-                f"""
-                SELECT s1.name, s2.name AS a, s3.name AS b
-                FROM link_to_agg e1
-                JOIN link_to_agg e2 ON e1.target_id = e2.source_id
-                JOIN link_to_agg e3 ON e2.target_id = e3.source_id
-                                    AND e3.target_id = e1.source_id
-                JOIN subreddit s1 ON e1.source_id = s1.id
-                JOIN subreddit s2 ON e1.target_id = s2.id
-                JOIN subreddit s3 ON e2.target_id = s3.id
-                WHERE e1.source_id = %s
-                  AND e1.target_id <> e2.target_id
-                  AND e1.sentiment {op} AND e2.sentiment {op} AND e3.sentiment {op}
+                """
+                SELECT
+                    s.subreddit AS source,
+                    a.subreddit AS node_a,
+                    b.subreddit AS node_b,
+                    r1.sentiment + r2.sentiment + r3.sentiment AS total_sentiment
+                FROM subreddits s
+
+                JOIN links_to_agg r1
+                    ON r1.start = s.id
+                JOIN subreddits a
+                    ON a.id = r1.finish
+
+                JOIN links_to_agg r2
+                    ON r2.start = a.id
+                JOIN subreddits b
+                    ON b.id = r2.finish
+
+                JOIN links_to_agg r3
+                    ON r3.start = b.id
+                AND r3.finish = s.id
+
+                -- reverse s ← a
+                JOIN links_to_agg rev1
+                    ON rev1.start = a.id
+                AND rev1.finish = s.id
+
+                -- reverse a ← b
+                JOIN links_to_agg rev2
+                    ON rev2.start = b.id
+                AND rev2.finish = a.id
+
+                -- reverse s ← b
+                JOIN links_to_agg rev3
+                    ON rev3.start = s.id
+                AND rev3.finish = b.id
+
+                WHERE s.subreddit = %s
+                AND r1.sentiment > %s
+                AND r2.sentiment > %s
+                AND r3.sentiment > %s
+                AND rev1.sentiment > %s
+                AND rev2.sentiment > %s
+                AND rev3.sentiment > %s
+                AND a.id <> b.id
+                AND a.subreddit < b.subreddit
+
+                ORDER BY total_sentiment DESC;
             """,
-                (source_id,),
+                (name, sentiment, sentiment, sentiment, sentiment, sentiment, sentiment,),
             ).fetchall()
 
         return _timed_per_input(run, subreddit_names)
 
     def friends_of_friends(self, subreddit_names: list[str]):
-        def run(name: str, pattern_length: int):
-            if name in ["shitamericanssay","botsrights"]:
-                # "gaming",
-                # "shitpost",
-                # "conspiracy",]:
-                return
-            return self._conn.execute(f"""
-                WITH RECURSIVE traversal AS (
-                    SELECT 
-                        l.target_id AS current, 
-                        l.source_id AS tracking_id, -- Need the start of the path for cycle tracking
-                        1 AS depth
-                    FROM link_to_agg l 
-                    INNER JOIN subreddit s ON l.source_id = s.id
-                    WHERE s.name = '{name}' 
-                    AND sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
+        def run(name: str):
+            return self._conn.execute("""
+                WITH RECURSIVE traversal (
+                    node,
+                    hop_distance,
+                    sentiments
+                ) AS (
+
+                    SELECT
+                        l.finish,
+                        1,
+                        ARRAY[l.sentiment]
+                    FROM subreddits s
+                    JOIN links_to_agg l
+                        ON l.start = s.id
+                    JOIN subreddits target
+                        ON target.id = l.finish
+                    WHERE s.subreddit = %s
+                    AND l.sentiment > %s
+                    AND l.link_count > %s
+                    AND target.degree < %s
 
                     UNION ALL
 
-                    SELECT 
-                        e.target_id, 
-                        e.source_id, -- Keep passing the source ID to trace the link
-                        t.depth + 1
+                    SELECT
+                        l.finish,
+                        t.hop_distance + 1,
+                        t.sentiments || l.sentiment
                     FROM traversal t
-                    INNER JOIN link_to_agg e ON e.source_id = t.current
-                    WHERE e.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}
-                    AND t.depth < {pattern_length}
+                    JOIN links_to_agg l
+                        ON l.start = t.node
+                    JOIN subreddits target
+                        ON target.id = l.finish
+                    WHERE t.hop_distance < 5
+                    AND l.sentiment > %s
+                    AND l.link_count > %s
+                    AND target.degree < %s
                 )
-                CYCLE tracking_id SET is_loop USING node_path
+                CYCLE node
+                SET is_cycle
+                USING path
 
-                SELECT node_path AS path 
-                FROM traversal 
-                WHERE NOT is_loop 
-                AND depth = {pattern_length};
-            """).fetchall()
+                SELECT
+                    s.subreddit AS reached_subreddit,
+                    t.hop_distance,
+                    (
+                        SELECT AVG(x)
+                        FROM unnest(t.sentiments) AS x
+                    ) AS avg_path_sentiment
+                FROM traversal t
+                JOIN subreddits s
+                    ON s.id = t.node
+                WHERE NOT t.is_cycle
+                ORDER BY
+                    t.hop_distance ASC,
+                    avg_path_sentiment DESC;
+            """, (name, FRIENDS_OF_FRIENDS_SENTIMENT, MIN_LINKS_AGGREGATED, P99_DEGREE, FRIENDS_OF_FRIENDS_SENTIMENT, MIN_LINKS_AGGREGATED, P99_DEGREE)).fetchall()
         return _timed_match(run, subreddit_names)
 
     def __enter__(self):

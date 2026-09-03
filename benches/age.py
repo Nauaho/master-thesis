@@ -75,264 +75,6 @@ class AGEBenchmark(GraphBenchmarks):
     def _escape(value: str) -> str:
         return value.replace("'", "\\'")
 
-    # ------------------------------------------------------------------
-    # AGEFreighter import
-    # ------------------------------------------------------------------
-
-    def prepare_agefreighter_data(
-        self,
-        output_dir: Path,
-    ) -> tuple[Path, int, int]:
-        """
-        Convert the two Reddit TSV files into the CSV format expected
-        by AGEFreighter.
-
-        Produces:
-            subreddits.csv
-            links.csv
-            config.json
-
-        Returns:
-            (config_path, node_count, edge_count)
-        """
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # --------------------------------------------------------------
-        # Pass 1:
-        # Collect unique subreddit names.
-        # --------------------------------------------------------------
-
-        subreddits: set[str] = set()
-
-        for input_path in INPUT_FILES:
-            print(f"Scanning {input_path}...")
-
-            with input_path.open(
-                "r",
-                encoding="utf-8",
-                newline="",
-            ) as f:
-                reader = csv.DictReader(f, delimiter="\t")
-
-                required_columns = {
-                    "SOURCE_SUBREDDIT",
-                    "TARGET_SUBREDDIT",
-                    "LINK_SENTIMENT",
-                }
-
-                if not required_columns.issubset(reader.fieldnames or []):
-                    raise BenchmarkImportError(
-                        f"{input_path} is missing required columns. "
-                        f"Found: {reader.fieldnames}"
-                    )
-
-                for row in reader:
-                    source = row["SOURCE_SUBREDDIT"]
-                    target = row["TARGET_SUBREDDIT"]
-
-                    if not source or not target:
-                        raise BenchmarkImportError(
-                            f"Empty subreddit name in {input_path}"
-                        )
-
-                    subreddits.add(source)
-                    subreddits.add(target)
-
-        print(f"Found {len(subreddits):,} unique subreddits")
-
-        ordered_subreddits = sorted(subreddits)
-
-        subreddit_to_id = {
-            name: idx
-            for idx, name in enumerate(
-                ordered_subreddits,
-                start=1,
-            )
-        }
-
-        nodes_path = output_dir / "subreddits.csv"
-
-        with nodes_path.open(
-            "w",
-            encoding="utf-8",
-            newline="",
-        ) as f:
-            writer = csv.writer(f)
-
-            writer.writerow(
-                [
-                    "id",
-                    "name",
-                ]
-            )
-
-            for name in ordered_subreddits:
-                writer.writerow(
-                    [
-                        subreddit_to_id[name],
-                        name,
-                    ]
-                )
-
-        edges_path = output_dir / "links.csv"
-
-        edge_id = 1
-
-        with edges_path.open(
-            "w",
-            encoding="utf-8",
-            newline="",
-        ) as f:
-            writer = csv.writer(f)
-
-            writer.writerow(
-                [
-                    "id",
-                    "start_id",
-                    "start_vertex_type",
-                    "end_id",
-                    "end_vertex_type",
-                    "sentimentScore",
-                ]
-            )
-
-            for input_path in INPUT_FILES:
-                print(f"Converting {input_path}...")
-
-                with input_path.open(
-                    "r",
-                    encoding="utf-8",
-                    newline="",
-                ) as source:
-                    reader = csv.DictReader(
-                        source,
-                        delimiter="\t",
-                    )
-
-                    for row in reader:
-                        source_name = row["SOURCE_SUBREDDIT"]
-                        target_name = row["TARGET_SUBREDDIT"]
-
-                        sentiment = float(row["LINK_SENTIMENT"])
-
-                        writer.writerow(
-                            [
-                                edge_id,
-                                subreddit_to_id[source_name],
-                                "Subreddit",
-                                subreddit_to_id[target_name],
-                                "Subreddit",
-                                sentiment,
-                            ]
-                        )
-
-                        edge_id += 1
-
-        edge_count = edge_id - 1
-
-        config_path = output_dir / "config.json"
-
-        config = {
-            "edge": {
-                "csv_path": str(edges_path.resolve()),
-                "type": "LINK_TO",
-                "props": [
-                    "sentimentScore",
-                ],
-                "start_vertex": {
-                    "csv_path": str(nodes_path.resolve()),
-                    "id": "id",
-                    "label": "Subreddit",
-                    "props": [
-                        "name",
-                    ],
-                },
-                "end_vertex": {
-                    "csv_path": str(nodes_path.resolve()),
-                    "id": "id",
-                    "label": "Subreddit",
-                    "props": [
-                        "name",
-                    ],
-                },
-            }
-        }
-
-        with config_path.open(
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(
-                config,
-                f,
-                indent=2,
-            )
-
-        print(f"Prepared nodes: {nodes_path}")
-        print(f"Prepared edges: {edges_path}")
-        print(f"Prepared config: {config_path}")
-
-        return (
-            config_path,
-            len(subreddits),
-            edge_count,
-        )
-
-    def _run_agefreighter(
-        self,
-        config_path: Path,
-    ) -> None:
-        """
-        Invoke AGEFreighter's CLI from the current Python process.
-        """
-
-        agefreighter = shutil.which("agefreighter")
-
-        if agefreighter is None:
-            raise BenchmarkImportError(
-                "AGEFreighter executable was not found in PATH. "
-                "Install it with: pip install agefreighter"
-            )
-
-        pg_connection_string = (
-            f"host=localhost "
-            f"port={self._port} "
-            f"dbname=postgres "
-            f"user=postgres "
-            f"password=password"
-        )
-
-        command = [
-            agefreighter,
-            "--graphname",
-            GRAPH_NAME,
-            "--pg-con-str",
-            pg_connection_string,
-            "load",
-            "--source-type",
-            "csv",
-            "--config",
-            str(config_path),
-            "--progress",
-        ]
-
-        print()
-        print("Running AGEFreighter:")
-        print(" ".join(command))
-        print()
-
-        result = subprocess.run(
-            command,
-            text=True,
-            check=False,
-        )
-
-        if result.returncode != 0:
-            raise BenchmarkImportError(
-                f"AGEFreighter failed with exit code {result.returncode}"
-            )
-
     def _create_indexes(self) -> None:
         """
         Create indexes after bulk loading.
@@ -498,7 +240,7 @@ class AGEBenchmark(GraphBenchmarks):
                 ↓
             preprocess to CSV
                 ↓
-            AGEFreighter COPY import
+            load_from_csv()
                 ↓
             indexes
                 ↓
@@ -543,39 +285,39 @@ class AGEBenchmark(GraphBenchmarks):
         )
 
         self._conn.execute(
-            f"""
-                    CREATE INDEX IF NOT EXISTS
-                        idx_link_to_id
-                    ON {GRAPH_NAME}."LINK_TO_AGG"
-                    USING BTREE (id);
-                    """
+        f"""
+            CREATE INDEX IF NOT EXISTS
+            idx_link_to_id
+            ON {GRAPH_NAME}."LINK_TO_AGG"
+            USING BTREE (id);
+        """
         )
 
         self._conn.execute(
             f"""
-                    CREATE INDEX IF NOT EXISTS
-                        idx_link_to_properties
-                    ON {GRAPH_NAME}."LINK_TO_AGG"
-                    USING GIN (properties);
-                    """
+            CREATE INDEX IF NOT EXISTS
+            idx_link_to_properties
+            ON {GRAPH_NAME}."LINK_TO_AGG"
+            USING GIN (properties);
+            """
         )
 
         self._conn.execute(
             f"""
-                    CREATE INDEX IF NOT EXISTS
-                        idx_link_to_start_id
-                    ON {GRAPH_NAME}."LINK_TO_AGG"
-                    USING BTREE (start_id);
-                    """
+            CREATE INDEX IF NOT EXISTS
+            idx_link_to_start_id
+            ON {GRAPH_NAME}."LINK_TO_AGG"
+            USING BTREE (start_id);
+            """
         )
 
         self._conn.execute(
             f"""
-                    CREATE INDEX IF NOT EXISTS
-                        idx_link_to_end_id
-                    ON {GRAPH_NAME}."LINK_TO_AGG"
-                    USING BTREE (end_id);
-                    """
+            CREATE INDEX IF NOT EXISTS
+            idx_link_to_end_id
+            ON {GRAPH_NAME}."LINK_TO_AGG"
+            USING BTREE (end_id);
+            """
         )
 
         self._conn.execute(
@@ -611,10 +353,6 @@ class AGEBenchmark(GraphBenchmarks):
                 f"got {edge_agg_count}"
             )
 
-    # ------------------------------------------------------------------
-    # Benchmarks
-    # ------------------------------------------------------------------
-
     def aggregate_graph(self):
 
         def run():
@@ -624,7 +362,7 @@ class AGEBenchmark(GraphBenchmarks):
                 RETURN
                     s.name,
                     t.name,
-                    sum(toFloat(r.sentimentScore)) AS sumSentiment,
+                    avg(toFloat(r.sentimentScore)) AS avgSentiment,
                     count(r)
                 ORDER BY sumSentiment DESC
                 """,
