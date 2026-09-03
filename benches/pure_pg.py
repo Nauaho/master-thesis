@@ -174,7 +174,7 @@ class PostgresGraphBenchmark(GraphBenchmarks):
 
         return _timed_repeated(run, n=5)
 
-    def common_neighbour_match(self, subreddit_names: list[str]):
+    def adamic_adar(self, subreddit_names: list[str]):
         # First, get the IDs for the provided subreddit names
         def run(name: str):
             # Get source subreddit ID

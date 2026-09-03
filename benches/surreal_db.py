@@ -436,7 +436,7 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             n=5,
         )
 
-    def common_neighbour_match(
+    def adamic_adar(
         self,
         subreddit_names: list[str],
     ):

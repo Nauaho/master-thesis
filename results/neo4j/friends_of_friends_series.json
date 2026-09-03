@@ -1,54 +1,11 @@
 {
-  "by_pattern_length": {
-    "1": {
-      "cold_run": 0.37676736399998845,
-      "hot_runs": [
-        0.24168232299984993,
-        0.18240899000011268,
-        0.2035007909998967,
-        0.171853327000008
-      ],
-      "errors": []
-    },
-    "2": {
-      "cold_run": 0.3357298720000017,
-      "hot_runs": [
-        0.45630936399993516,
-        0.32751088599979994,
-        0.2708419020000292,
-        0.26751085000000785
-      ],
-      "errors": []
-    },
-    "3": {
-      "cold_run": 0.4839932399997906,
-      "hot_runs": [
-        0.37432202400009373,
-        0.33111871899996004,
-        0.3390280169999187,
-        0.3339127809999809
-      ],
-      "errors": []
-    },
-    "4": {
-      "cold_run": 2.883507903000009,
-      "hot_runs": [
-        0.49445322700012184,
-        0.40640183200002866,
-        0.6730737010000212,
-        0.40309904900004767
-      ],
-      "errors": []
-    },
-    "5": {
-      "cold_run": 292.3272865669999,
-      "hot_runs": [
-        0.5350144029998773,
-        0.4869710599998598,
-        33.10092846900011,
-        0.47067442200000187
-      ],
-      "errors": []
-    }
-  }
+  "cold_run": null,
+  "hot_runs": [],
+  "errors": [
+    "input='minecraft': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
+    "input='anime': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
+    "input='socialism': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
+    "input='the_donald': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
+    "input='conspiracy': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '$': expected '}' or an integer value (line 3, column 164 (offset: 214))\n\"                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)\"\n                                                                                                                                                                    ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}"
+  ]
 }

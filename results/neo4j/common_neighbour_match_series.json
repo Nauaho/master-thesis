@@ -1,11 +1,10 @@
 {
-  "cold_run": null,
-  "hot_runs": [],
-  "errors": [
-    "input='shitamericanssay': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '{': expected an identifier or '}' (line 2, column 37 (offset: 37))\n\"                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)\"\n                                     ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='botsrights': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '{': expected an identifier or '}' (line 2, column 37 (offset: 37))\n\"                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)\"\n                                     ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='gaming': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '{': expected an identifier or '}' (line 2, column 37 (offset: 37))\n\"                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)\"\n                                     ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='shitpost': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '{': expected an identifier or '}' (line 2, column 37 (offset: 37))\n\"                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)\"\n                                     ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}",
-    "input='conspiracy': {neo4j_code: Neo.ClientError.Statement.SyntaxError} {message: Invalid input '{': expected an identifier or '}' (line 2, column 37 (offset: 37))\n\"                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)\"\n                                     ^} {gql_status: 42001} {gql_status_description: error: syntax error or access rule violation - invalid syntax}"
-  ]
+  "cold_run": 0.746832339000008,
+  "hot_runs": [
+    0.06459917700001938,
+    0.07256832199999508,
+    0.23248428400000876,
+    0.22049860399999943
+  ],
+  "errors": []
 }

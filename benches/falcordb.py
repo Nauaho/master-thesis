@@ -274,7 +274,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return _timed_repeated(run, n=5)
 
-    def common_neighbour_match(self, subreddit_names: list[str]):
+    def adamic_adar(self, subreddit_names: list[str]):
         def run(name):
             return self._exec(
                 """

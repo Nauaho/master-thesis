@@ -9,8 +9,12 @@ from .base import (
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
     EXPECTED_EMBEDDED_NODE_COUNT,
-    TRAVERSAL_LIMIT,
+    ADAMIC_AGAR_MIN_SENTIMENT,
+    CYCLE_DETECTION_SENTIMENT,
+    P99_DEGREE,
     FRIENDS_OF_FRIENDS_SENTIMENT,
+    TRAVERSAL_LIMIT,
+    MIN_LINKS_AGGREGATED,
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
@@ -23,7 +27,7 @@ INDEX_NAME = "subreddit_embeddings"  # single source of truth — was mismatched
 class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
     def __init__(self, port: int):
         self._driver = GraphDatabase.driver(
-            f"bolt://localhost:{7687}", auth=("neo4j", "password")
+            f"bolt://localhost:{port}", auth=("neo4j", "password")
         )
         self.db_name = "neo4j"
 
@@ -54,7 +58,7 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
                         MERGE (target:Subreddit {{name: row.TARGET_SUBREDDIT}})
                         CREATE (source)-[r:LINK_TO {{
                             postId: row.POST_ID,
-                            timestamp: replace(row.TIMESTAMP, ' ', 'T'),
+                            timestamp: datetime(replace(row.TIMESTAMP, ' ', 'T')),
                             sentimentScore: toFloat(row.LINK_SENTIMENT),
                             properties: [p IN split(row.PROPERTIES, ',') | toFloat(p)]
                         }}]->(target)
@@ -175,7 +179,24 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         """)
 
         self._exec("""
+            MATCH (s:Subreddit)
+            OPTIONAL MATCH (s)-[out:LINK_TO_AGG]->()
+            WITH s, count(out) AS outDeg
+            OPTIONAL MATCH (s)<-[inc:LINK_TO_AGG]-()
+            WITH s, outDeg, count(inc) AS inDeg
+            SET s.outDegree = outDeg, s.inDegree = inDeg, s.degree = outDeg + inDeg
+        """)
+
+        self._exec("""
             CREATE INDEX agg_link_sentiment FOR ()-[r:LINK_TO_AGG]->() ON (r.sentiment);
+        """)
+
+        self._exec("""
+            CREATE INDEX agg_link_degree FOR ()-[r:LINK_TO_AGG]->() ON (r.linkCount);
+        """)
+
+        self._exec("""
+            CREATE INDEX subreddit_degree FOR (s:Subreddit) ON (s.degree);
         """)
 
         edge_agg_records, _, _ = self._exec(
@@ -191,50 +212,87 @@ class Neo4jBenchamrk(GraphBenchmarks, VectorBenchmarks):
         def run():
             return self._exec("""
                 MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
-                RETURN s.name AS source, t.name AS target, sum(r.sentimentScore) AS sentiment, count(r) AS linkCount
+                RETURN s.name AS source, t.name AS target, avg(r.sentimentScore) AS sentiment, count(r) AS linkCount
                 ORDER BY sentiment DESC
             """)
 
         return _timed_repeated(run, n=5)
 
-    def common_neighbour_match(self, subreddit_names: list[str]):
+    def adamic_adar(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
-                """
-                MATCH (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG WHERE r1.sentiment > 0.33]->(common:Subreddit)<-[r2:LINK_TO_AGG WHERE r2.sentiment > 0.33]-(newFriend:Subreddit)
-                WHERE s <> newFriend
-                    AND NOT EXISTS {{ (s)-[:LINK_TO_AGG]->(newFriend) }}
-                    AND NOT EXISTS {{ (newFriend)-[:LINK_TO_AGG]->(s) }}
-                RETURN newFriend.name AS newFriend, r2.sentiment - r1.sentiment AS delta_interest
-                ORDER BY delta_interest DESC
+            """
+                MATCH (s:Subreddit {name: $name})
+                MATCH (s)-[r1:LINK_TO_AGG WHERE r1.sentiment > $minSentiment]->(common:Subreddit)
+                WHERE common.degree < $hubDegreeCap
+                MATCH (common)<-[r2:LINK_TO_AGG WHERE r2.sentiment > $minSentiment]-(newFriend:Subreddit)
+                WHERE s <> newFriend AND NOT EXISTS { (s)-[:LINK_TO_AGG]-(newFriend) }
+                WITH newFriend,
+                    COUNT(DISTINCT common) AS commonNeighborsCount,
+                    AVG(abs(r1.sentiment - r2.sentiment)) AS avgDeltaSentiment,
+                    SUM(1.0 / log(common.degree + 2)) AS adamicAdarScore
+                WHERE commonNeighborsCount >= 3
+                RETURN newFriend.name AS suggestedSubreddit,
+                    commonNeighborsCount, avgDeltaSentiment, adamicAdarScore,
+                    adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
+                ORDER BY combinedScore DESC
+                LIMIT 50
             """,
                 name=name,
+                minSentiment=ADAMIC_AGAR_MIN_SENTIMENT,
+                hubDegreeCap=P99_DEGREE
             )
 
         return _timed_per_input(run, subreddit_names)
 
-    def cycle_detection(self, subreddit_names: list[str], category: str = "positive"):
-        op = self._sentiment_op(category)
-
+    def cycle_detection(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
-                f"""
-                MATCH p = (s:Subreddit {{name: $name}})-[r1:LINK_TO_AGG WHERE r1.sentiment {op}]->(a:Subreddit)-[r2:LINK_TO_AGG WHERE r2.sentiment {op}]->(b:Subreddit)-[r3:LINK_TO_AGG WHERE r3.sentiment {op}]->(s)
-                WHERE a <> b
+            """
+                MATCH (s:Subreddit {name: $name})
+                MATCH p = (s)-[r1:LINK_TO_AGG WHERE r1.sentiment > $minSentiment]->(a:Subreddit)
+                        -[r2:LINK_TO_AGG WHERE r2.sentiment > $minSentiment]->(b:Subreddit)
+                        -[r3:LINK_TO_AGG WHERE r3.sentiment > $minSentiment]->(s)
+                WHERE a <> b AND a.name < b.name
+                MATCH (a)-[rev1:LINK_TO_AGG WHERE rev1.sentiment > $minSentiment]->(s)
+                MATCH (b)-[rev2:LINK_TO_AGG WHERE rev2.sentiment > $minSentiment]->(a)
+                MATCH (s)-[rev3:LINK_TO_AGG WHERE rev3.sentiment > $minSentiment]->(b)
                 RETURN p
+                ORDER BY reduce(total = 0.0, r IN relationships(p) | total + r.sentiment) DESC
+                LIMIT 100
             """,
                 name=name,
+                minSentiment=CYCLE_DETECTION_SENTIMENT
             )
 
         return _timed_per_input(run, subreddit_names)
 
     def friends_of_friends(self, subreddit_names: list[str]):
-        def run(name: str, pattern_length: int):
-            return self._exec(f"""
-                MATCH p = ACYCLIC (s:Subreddit {{name: $name}})-[r:LINK_TO_AGG WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT}]->{{{pattern_length}}}(friend:Subreddit)
-                RETURN p
-            """, name=name)
-        return _timed_match(run, subreddit_names)
+        def run(name: str):
+            return self._exec(
+            """
+                MATCH (s:Subreddit {name: $name})
+                MATCH p = ACYCLIC (s) ( (a)-[r:LINK_TO_AGG WHERE r.sentiment > $minSentiment AND r.linkCount > $minLinkCount]->(b) WHERE b.degree < $degreeCap ){1,$maxHops} (t)
+
+                WITH t, p,
+                    length(p) AS hopDistance,
+                    reduce(total = 0.0, rel IN relationships(p) | total + rel.sentiment) / length(p) AS avgPathSentiment
+                ORDER BY t.name, hopDistance ASC, avgPathSentiment DESC
+                WITH t, collect({path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment})[0] AS best
+
+                RETURN t.name AS reachedSubreddit,
+                    best.hopDistance AS hopDistance,
+                    best.avgPathSentiment AS avgPathSentiment
+                ORDER BY hopDistance ASC, avgPathSentiment DESC
+                LIMIT 200
+            """, 
+            name=name, 
+            minSentiment=FRIENDS_OF_FRIENDS_SENTIMENT,
+            minLinkCount=MIN_LINKS_AGGREGATED, 
+            degreeCap=P99_DEGREE,
+            maxHops=TRAVERSAL_LIMIT
+            )
+        return _timed_per_input(run, subreddit_names)
 
     def knn(self, query_vectors: dict, k: int = 10):
         def run_query(vec):
@@ -303,7 +361,7 @@ def wait_neo4j_ready(port: int, timeout: int = 60):
     while time.time() < deadline:
         try:
             driver = GraphDatabase.driver(
-                f"bolt://localhost:{7687}", auth=("neo4j", "password")
+                f"bolt://localhost:{port}", auth=("neo4j", "password")
             )
             driver.verify_connectivity()
             driver.close()

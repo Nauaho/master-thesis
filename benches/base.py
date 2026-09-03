@@ -13,17 +13,16 @@ EXPECTED_EMBEDDED_NODE_COUNT = 51_269
 EXPECTED_EDGE_AGG_COUNT = 339_643
 EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET = 67_180
 
+P99_DEGREE = 123
+ADAMIC_AGAR_MIN_SENTIMENT = 0.7
+CYCLE_DETECTION_SENTIMENT = 0.5
 FRIENDS_OF_FRIENDS_SENTIMENT = 0.5
 MATCH_AGG_MAX = 5
-TRAVERSAL_LIMIT = 500
+TRAVERSAL_LIMIT = 5
+MIN_LINKS_AGGREGATED = 2
 GRAPH_QUERY_SUBREDDITS = [
-    "shitamericanssay",
-    "botsrights",
-    "gaming",
-    "shitpost",
-    "conspiracy",
+    "minecraft", "anime", "socialism", "the_donald", "conspiracy"
 ]
-LINKS_CATEGORIES = ("positive", "negative")
 
 @dataclass
 class BenchMarkResult:
@@ -141,11 +140,11 @@ class BaseBenchmarks(ABC):
             )
             return
 
-        # if isinstance(self, GraphBenchmarks):
-        #     self.perform_graph_benchmarks()
+        if isinstance(self, GraphBenchmarks):
+            self.perform_graph_benchmarks()
 
-        if isinstance(self, VectorBenchmarks):
-            self.perform_vector_benchmarks()
+        # if isinstance(self, VectorBenchmarks):
+        #     self.perform_vector_benchmarks()
 
     def __enter__(self):
         return self
@@ -160,7 +159,7 @@ class GraphBenchmarks(BaseBenchmarks):
         print("Implement the graph aggregation")
 
     @abstractmethod
-    def common_neighbour_match(self, subreddit_names: list[str]):
+    def adamic_adar(self, subreddit_names: list[str]):
         print("Implement the neighbour search")
 
     @abstractmethod
@@ -190,19 +189,18 @@ class GraphBenchmarks(BaseBenchmarks):
 
         print(f"[{self.db_name}] Performing common-neighbour match benchmark.")
         self._save(
-            "common_neighbour_match", self.common_neighbour_match(subreddit_names)
+            "common_neighbour_match", self.adamic_adar(subreddit_names)
         )
 
-        for category in ("positive", "negative"):
-            print(
-                f"[{self.db_name}] Performing cycle detection benchmark ({category})."
-            )
-            self._save(
-                f"cycle_{category}", self.cycle_detection(subreddit_names, category)
-            )
+        print(
+            f"[{self.db_name}] Performing cycle detection benchmark."
+        )
+        self._save(
+            "cycles", self.cycle_detection(subreddit_names)
+        )
 
-        # print(f"[{self.db_name}] Performing friends of friends match benchmark.")
-        # self._save("friends_of_friends", self.friends_of_friends(subreddit_names))
+        print(f"[{self.db_name}] Performing friends of friends match benchmark.")
+        self._save("friends_of_friends", self.friends_of_friends(subreddit_names))
 
         print(f"[{self.db_name}] Graph benchmarks completed.")
 

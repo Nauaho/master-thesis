@@ -2,7 +2,6 @@ import csv
 import json
 import shutil
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -639,7 +638,7 @@ class AGEBenchmark(GraphBenchmarks):
             n=5,
         )
 
-    def common_neighbour_match(
+    def adamic_adar(
         self,
         subreddit_names: list[str],
     ):
