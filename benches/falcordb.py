@@ -255,30 +255,92 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
     def persist_aggregation(self):
         self._exec("""
             MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
-            WITH s, t, avg(r.sentimentScore) AS sentiment, count(r) AS linkCount
+
+            WITH
+                s,
+                t,
+                avg(r.sentimentScore) AS sentiment,
+                count(r) AS linkCount
+
             MERGE (s)-[agg:LINK_TO_AGG]->(t)
-            SET agg.sentiment = sentiment, agg.linkCount = linkCount
+
+            SET
+                agg.sentiment = sentiment,
+                agg.linkCount = linkCount
         """)
 
-        self._exec("CREATE INDEX FOR ()-[r:LINK_TO_AGG]-() ON (r.sentiment)")
+        self._exec("""
+            CREATE INDEX FOR ()-[r:LINK_TO_AGG]-() ON (r.sentiment)
+        """)
+
+        self._exec("""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= $minSentiment 
+
+            MERGE (s)-[:FRIENDSHIP]->(t)
+        """, minSentiment = CYCLE_DETECTION_SENTIMENT)
+
+        self._exec("""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= $minSentiment
+
+            MERGE (s)-[:LOVE]->(t)
+        """, minSentiment = ADAMIC_AGAR_MIN_SENTIMENT)
+
+        self._exec("""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= $minSentiment AND agg.linkCount >= $minLinkCount
+        
+            MERGE (s)-[:TRUE_FRIENDSHIP]->(t)
+        """, minSentiment = FRIENDS_OF_FRIENDS_SENTIMENT, minLinkCount = MIN_LINKS_AGGREGATED)
 
         self._exec("""
             MATCH (s:Subreddit)
+
             OPTIONAL MATCH (s)-[out:LINK_TO_AGG]->()
             WITH s, count(out) AS outDeg
+
             OPTIONAL MATCH (s)<-[inc:LINK_TO_AGG]-()
-            WITH s, outDeg, count(inc) AS inDeg
-            SET s.outDegree = outDeg, s.inDegree = inDeg, s.degree = outDeg + inDeg
+            WITH
+                s,
+                outDeg,
+                count(inc) AS inDeg
+
+            SET
+                s.outDegree = outDeg,
+                s.inDegree = inDeg,
+                s.degree = outDeg + inDeg
         """)
 
-        self._exec("CREATE INDEX FOR (s:Subreddit) ON (s.degree)")
+        self._exec("""
+            CREATE INDEX FOR (s:Subreddit) ON (s.degree)
+        """)
 
-        edge_agg_count = self._exec(
-            "MATCH ()-[r:LINK_TO_AGG]->() RETURN count(r) AS c"
-        ).result_set[0][0]
+        self._exec("""
+            MATCH (s:Subreddit)
+            WHERE s.degree <= $threshold
+
+            SET s:Community
+            REMOVE s:Hub
+        """, threshold=P99_DEGREE)
+
+        self._exec("""
+            MATCH (s:Subreddit)
+            WHERE s.degree > $threshold
+
+            SET s:Hub
+            REMOVE s:Community
+        """, threshold=P99_DEGREE)
+
+        edge_agg_count = self._exec("""
+            MATCH ()-[r:LINK_TO_AGG]->()
+            RETURN count(r) AS c
+        """).result_set[0][0]
+
         if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
             raise BenchmarkImportError(
-                f"FalkorDB aggregation validation failed: expected {EXPECTED_EDGE_AGG_COUNT}, got {edge_agg_count}"
+                f"FalkorDB aggregation validation failed: "
+                f"expected {EXPECTED_EDGE_AGG_COUNT}, got {edge_agg_count}"
             )
 
     def aggregate_graph(self):
@@ -297,11 +359,9 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             return self._exec(
             """ 
             MATCH (s:Subreddit {name: $name})
-            MATCH (s)-[r1:LINK_TO_AGG]->(common:Subreddit)
-            WHERE common.degree < $hubDegreeCap AND r1.sentiment > $minSentiment
-            MATCH (common)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
-            WHERE r2.sentiment > $minSentiment AND s <> newFriend 
-                AND NOT (s)-[:LINK_TO_AGG]-(newFriend)
+            MATCH (s)-[r1:LOVE]->(common:Community)
+            MATCH (common)<-[r2:LOVE]-(newFriend:Community)
+            WHERE s <> newFriend AND NOT (s)-[:LINK_TO_AGG|FRIENDSHIP|LOVE]-(newFriend)
             WITH newFriend, common, r1, r2
             WITH newFriend,
                 COUNT(DISTINCT common) AS commonNeighborsCount,
@@ -313,9 +373,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
             ORDER BY combinedScore DESC
             """,
-                name=name,
-                hubDegreeCap=P99_DEGREE,
-                minSentiment=ADAMIC_AGAR_MIN_SENTIMENT
+                name=name
             )
 
         return _timed_per_input(run, subreddit_names)
@@ -325,17 +383,15 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             return self._exec(
                 """
                 MATCH (s:Subreddit {name: $name})
-                MATCH p = (s)-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
-                WHERE r1.sentiment > $minSentiment AND r2.sentiment > $minSentiment AND r3.sentiment > $minSentiment
-                AND a <> b AND a.name < b.name
-                MATCH (a)-[rev1:LINK_TO_AGG]->(s)
-                MATCH (b)-[rev2:LINK_TO_AGG]->(a)
-                MATCH (s)-[rev3:LINK_TO_AGG]->(b)
-                WHERE rev1.sentiment > $minSentiment AND rev2.sentiment > $minSentiment AND rev3.sentiment > $minSentiment
+                MATCH p = (s)-[r1:FRIENDSHIP]->(a:Community)-[r2:FRIENDSHIP]->(b:Community)-[r3:FRIENDSHIP]->(s)
+                WHERE a <> b AND a.name < b.name
+                MATCH (a)-[rev1:FRIENDSHIP]->(s)
+                MATCH (b)-[rev2:FRIENDSHIP]->(a)
+                MATCH (s)-[rev3:FRIENDSHIP]->(b)
                 RETURN p
                 ORDER BY reduce(total = 0.0, r IN relationships(p) | total + r.sentiment) DESC
             """,
-                name=name, minSentiment=CYCLE_DETECTION_SENTIMENT
+                name=name
             )
 
         return _timed_per_input(run, subreddit_names)
@@ -345,10 +401,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             return self._exec(
             f"""
             MATCH (s:Subreddit {{name: $name}})
-            MATCH p = (s)-[:LINK_TO_AGG*1..{TRAVERSAL_LIMIT}]->(t:Subreddit)
-            WHERE ALL(n IN nodes(p)[1..] WHERE n.degree < $degreeCap) AND
-                ALL(rel IN relationships(p) WHERE rel.sentiment > $minSentiment AND rel.linkCount > $minLinkCount) 
-
+            MATCH p = (s)-[:TRUE_FRIENDSHIP*1..{TRAVERSAL_LIMIT}]->(t:Community)
             WITH p, t, nodes(p) AS ns
             UNWIND ns AS n
             WITH p, t, ns, count(DISTINCT n) AS distinctCount, count(n) AS totalCount
@@ -365,10 +418,7 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 best.avgPathSentiment AS avgPathSentiment
             ORDER BY hopDistance ASC, avgPathSentiment DESC
             """, 
-            name=name,
-            minSentiment=FRIENDS_OF_FRIENDS_SENTIMENT,
-            minLinkCount=MIN_LINKS_AGGREGATED, 
-            degreeCap=P99_DEGREE)
+            name=name)
         return _timed_per_input(run, subreddit_names)
 
     def __enter__(self):

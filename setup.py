@@ -109,15 +109,15 @@ db_specs = [
     #     },
     #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
     #     ),
-    # DBSpec(
-    #     image=FALCOR,
-    #     internal_port=6379,
-    #     env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
-    #     benchmark_cls=FalkorDBBenchmark,
-    #     wait_ready=wait_falkordb_ready,
-    #     volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
-    #     command=["redis-server", "--maxmemory", "14gb"],
-    # ),
+    DBSpec(
+        image=FALCOR,
+        internal_port=6379,
+        env={"FALKORDB_ARGS": "THREAD_COUNT 4 TIMEOUT_DEFAULT 0 TIMEOUT_MAX 0"},
+        benchmark_cls=FalkorDBBenchmark,
+        wait_ready=wait_falkordb_ready,
+        volumes={str(DATA_DIR): {"bind": "/var/lib/FalkorDB/import/", "mode": "ro"}},
+        command=["redis-server", "--maxmemory", "14gb"],
+    ),
     # DBSpec(
         #     image=MONGO,
         #     internal_port=27017,
@@ -126,18 +126,18 @@ db_specs = [
         #     wait_ready=wait_mongo_ready,
         #     command=["mongod", "--wiredTigerCacheSizeGB", "7.5"],  # ~50% of 16GB, minus overhead — WiredTiger's own sizing guidance
         # ),
-    DBSpec(
-        image=POSTGRES,
-        internal_port=5432,
-        env={"POSTGRES_PASSWORD": "password"},
-        volumes={
-            str(DATA_DIR): {"bind": "/import", "mode": "ro"},
-            str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-        },
-        command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
-        benchmark_cls=PostgresGraphBenchmark,
-            wait_ready=wait_postgres_sql_ready,
-    ),
+    # DBSpec(
+    #     image=POSTGRES,
+    #     internal_port=5432,
+    #     env={"POSTGRES_PASSWORD": "password"},
+    #     volumes={
+    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"},
+    #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
+    #     },
+    #     command=["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"],
+    #     benchmark_cls=PostgresGraphBenchmark,
+    #         wait_ready=wait_postgres_sql_ready,
+    # ),
     # DBSpec(
     #     image=SURREAL,
     #     internal_port=8000,

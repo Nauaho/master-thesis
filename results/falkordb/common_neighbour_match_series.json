@@ -1,11 +1,10 @@
 {
-  "cold_run": 1248.6831130070004,
+  "cold_run": 0.10939469199996665,
   "hot_runs": [
-    1150.659014588
+    0.11597294599999941,
+    0.11475522599999977,
+    0.9950982560000057,
+    1.020595070000013
   ],
-  "errors": [
-    "input='anime': Query timed out",
-    "input='the_donald': Query timed out",
-    "input='conspiracy': Query timed out"
-  ]
+  "errors": []
 }

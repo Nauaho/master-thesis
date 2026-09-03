@@ -1,12 +1,10 @@
 import time
-import csv
 import psycopg
 from .base import (
     GraphBenchmarks,
     BenchmarkImportError,
     _timed_repeated,
     _timed_per_input,
-    _timed_match,
     EXPECTED_NODE_COUNT,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
