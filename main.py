@@ -5,8 +5,8 @@ from scripts.prepare_age_edges import prepare_age_edges
 
 def main():
     print("Hello from master-thesis!")
-    # prepare_csvs()
-    # prepare_age_edges()
+    prepare_csvs()
+    prepare_age_edges()
     setup()
     run_all_benchmarks()
 
