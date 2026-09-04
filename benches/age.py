@@ -472,157 +472,157 @@ class AGEBenchmark(GraphBenchmarks):
 
             raise BenchmarkImportError(f"AGE import failed: {e}") from e
 
-    def persist_aggregation(self):
+    # def persist_aggregation(self):
 
-        print("Aggregating LINK_TO edges...")
+    #     print("Aggregating LINK_TO edges...")
 
-        self._exec(
+    #     self._exec(
 
-            """
+    #         """
 
-            MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
+    #         MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
 
-            WITH s, t, avg(r.sentimentScore) AS avgSentiment, count(r) AS linkCount
+    #         WITH s, t, avg(r.sentimentScore) AS avgSentiment, count(r) AS linkCount
 
-            CREATE (s)-[agg:LINK_TO_AGG]->(t)
+    #         CREATE (s)-[agg:LINK_TO_AGG]->(t)
 
-            SET
+    #         SET
 
-                agg.sentiment = avgSentiment,
+    #             agg.sentiment = avgSentiment,
 
-                agg.linkCount = linkCount
+    #             agg.linkCount = linkCount
 
-            """
+    #         """
 
-        )
+    #     )
 
-        # LINK_TO_AGG indexes created immediately — every materialization
+    #     # LINK_TO_AGG indexes created immediately — every materialization
 
-        # step below filters/traverses on agg.sentiment, so they need to
+    #     # step below filters/traverses on agg.sentiment, so they need to
 
-        # exist before those queries run, not just before benchmarking.
+    #     # exist before those queries run, not just before benchmarking.
 
-        self._conn.execute(
+    #     self._conn.execute(
 
-            f"""
+    #         f"""
 
-            CREATE INDEX IF NOT EXISTS
+    #         CREATE INDEX IF NOT EXISTS
 
-            idx_link_to_agg_id
+    #         idx_link_to_agg_id
 
-            ON {GRAPH_NAME}."LINK_TO_AGG"
+    #         ON {GRAPH_NAME}."LINK_TO_AGG"
 
-            USING BTREE (id);
+    #         USING BTREE (id);
 
-            """
+    #         """
 
-        )
+    #     )
 
-        self._conn.execute(
+    #     self._conn.execute(
 
-            f"""
+    #         f"""
 
-            CREATE INDEX IF NOT EXISTS
+    #         CREATE INDEX IF NOT EXISTS
 
-            idx_link_to_agg_properties
+    #         idx_link_to_agg_properties
 
-            ON {GRAPH_NAME}."LINK_TO_AGG"
+    #         ON {GRAPH_NAME}."LINK_TO_AGG"
 
-            USING GIN (properties);
+    #         USING GIN (properties);
 
-            """
+    #         """
 
-        )
+    #     )
 
-        self._conn.execute(
+    #     self._conn.execute(
 
-            f"""
+    #         f"""
 
-            CREATE INDEX IF NOT EXISTS
+    #         CREATE INDEX IF NOT EXISTS
 
-            idx_link_to_agg_start_id
+    #         idx_link_to_agg_start_id
 
-            ON {GRAPH_NAME}."LINK_TO_AGG"
+    #         ON {GRAPH_NAME}."LINK_TO_AGG"
 
-            USING BTREE (start_id);
+    #         USING BTREE (start_id);
 
-            """
+    #         """
 
-        )
+    #     )
 
-        self._conn.execute(
+    #     self._conn.execute(
 
-            f"""
+    #         f"""
 
-            CREATE INDEX IF NOT EXISTS
+    #         CREATE INDEX IF NOT EXISTS
 
-            idx_link_to_agg_end_id
+    #         idx_link_to_agg_end_id
 
-            ON {GRAPH_NAME}."LINK_TO_AGG"
+    #         ON {GRAPH_NAME}."LINK_TO_AGG"
 
-            USING BTREE (end_id);
+    #         USING BTREE (end_id);
 
-            """
+    #         """
 
-        )
+    #     )
 
-        self._conn.execute(
+    #     self._conn.execute(
 
-            f"""
+    #         f"""
 
-            CREATE INDEX idx_link_agg_sentimentScore
+    #         CREATE INDEX idx_link_agg_sentimentScore
 
-            ON {GRAPH_NAME}."LINK_TO_AGG"
+    #         ON {GRAPH_NAME}."LINK_TO_AGG"
 
-            USING btree (
+    #         USING btree (
 
-                agtype_access_operator(
+    #             agtype_access_operator(
 
-                    VARIADIC ARRAY[
+    #                 VARIADIC ARRAY[
 
-                        properties,
+    #                     properties,
 
-                        '"sentiment"'::agtype
+    #                     '"sentiment"'::agtype
 
-                    ]
+    #                 ]
 
-                )
+    #             )
 
-            );
+    #         );
 
-            """
+    #         """
 
-        )
+    #     )
 
-        self._conn.execute(f'ANALYZE {GRAPH_NAME}."LINK_TO_AGG";')
+    #     self._conn.execute(f'ANALYZE {GRAPH_NAME}."LINK_TO_AGG";')
 
-        edge_agg_count = int(
+    #     edge_agg_count = int(
 
-            self._exec(
+    #         self._exec(
 
-                """
+    #             """
 
-                MATCH ()-[r:LINK_TO_AGG]->()
+    #             MATCH ()-[r:LINK_TO_AGG]->()
 
-                RETURN count(r)
+    #             RETURN count(r)
 
-                """
+    #             """
 
-            )[0][0]
+    #         )[0][0]
 
-        )
+    #     )
 
-        if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
+    #     if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
 
-            raise BenchmarkImportError(
+    #         raise BenchmarkImportError(
 
-                "AGE aggregation validation failed: "
+    #             "AGE aggregation validation failed: "
 
-                f"expected {EXPECTED_EDGE_AGG_COUNT}, "
+    #             f"expected {EXPECTED_EDGE_AGG_COUNT}, "
 
-                f"got {edge_agg_count}"
+    #             f"got {edge_agg_count}"
 
-            )
+    #         )
 
 
     def aggregate_graph(self):
@@ -665,171 +665,171 @@ class AGEBenchmark(GraphBenchmarks):
 
         )
 
-    def adamic_adar(self, subreddit_names: list[str]):
+    # def adamic_adar(self, subreddit_names: list[str]):
 
-        def run(name: str):
+    #     def run(name: str):
 
-            return self._exec(
+    #         return self._exec(
 
-                f"""
+    #             f"""
 
-                MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)
+    #             MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)
 
-                WHERE r1.sentiment >= {ADAMIC_AGAR_MIN_SENTIMENT}
+    #             WHERE r1.sentiment >= {ADAMIC_AGAR_MIN_SENTIMENT}
 
-                AND common.degree <= {P99_DEGREE}
+    #             AND common.degree <= {P99_DEGREE}
 
-                MATCH (common)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
+    #             MATCH (common)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
 
-                WHERE r2.sentiment >= {ADAMIC_AGAR_MIN_SENTIMENT}
+    #             WHERE r2.sentiment >= {ADAMIC_AGAR_MIN_SENTIMENT}
 
-                AND newFriend.degree <= {P99_DEGREE}
+    #             AND newFriend.degree <= {P99_DEGREE}
 
-                AND s <> newFriend
+    #             AND s <> newFriend
 
-                OPTIONAL MATCH (s)-[existing:LINK_TO_AGG]-(newFriend)
+    #             OPTIONAL MATCH (s)-[existing:LINK_TO_AGG]-(newFriend)
 
-                WITH newFriend, common, r1, r2, existing
+    #             WITH newFriend, common, r1, r2, existing
 
-                WHERE existing IS NULL
+    #             WHERE existing IS NULL
 
-                WITH newFriend,
+    #             WITH newFriend,
 
-                    count(DISTINCT common) AS commonNeighborsCount,
+    #                 count(DISTINCT common) AS commonNeighborsCount,
 
-                    avg(abs(r1.sentiment - r2.sentiment)) AS avgDeltaSentiment,
+    #                 avg(abs(r1.sentiment - r2.sentiment)) AS avgDeltaSentiment,
 
-                    sum(1.0 / log(common.degree + 2)) AS adamicAdarScore
+    #                 sum(1.0 / log(common.degree + 2)) AS adamicAdarScore
 
-                WHERE commonNeighborsCount >= 3
+    #             WHERE commonNeighborsCount >= 3
 
-                RETURN newFriend.name,
+    #             RETURN newFriend.name,
 
-                    commonNeighborsCount,
+    #                 commonNeighborsCount,
 
-                    avgDeltaSentiment,
+    #                 avgDeltaSentiment,
 
-                    adamicAdarScore,
+    #                 adamicAdarScore,
 
-                    adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
+    #                 adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
 
-                ORDER BY combinedScore DESC
+    #             ORDER BY combinedScore DESC
 
-                """,
+    #             """,
 
-                out_cols=(
+    #             out_cols=(
 
-                    "suggested agtype, commonNeighborsCount agtype, "
+    #                 "suggested agtype, commonNeighborsCount agtype, "
 
-                    "avgDeltaSentiment agtype, adamicAdarScore agtype, combinedScore agtype"
+    #                 "avgDeltaSentiment agtype, adamicAdarScore agtype, combinedScore agtype"
 
-                ),
+    #             ),
 
-            )
+    #         )
 
-        return _timed_per_input(run, subreddit_names)
+    #     return _timed_per_input(run, subreddit_names)
 
-    def cycle_detection(self, subreddit_names: list[str]):
+    # def cycle_detection(self, subreddit_names: list[str]):
 
-        def run(name: str):
+    #     def run(name: str):
 
-            return self._exec(
+    #         return self._exec(
 
-                f"""
+    #             f"""
 
-                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
+    #             MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
 
-                WHERE r1.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             WHERE r1.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                AND r2.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             AND r2.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                AND r3.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             AND r3.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                AND a <> b AND a.name < b.name
+    #             AND a <> b AND a.name < b.name
 
-                AND a.degree <= {P99_DEGREE} AND b.degree <= {P99_DEGREE}
+    #             AND a.degree <= {P99_DEGREE} AND b.degree <= {P99_DEGREE}
 
-                MATCH (a)-[rev1:LINK_TO_AGG]->(s)
+    #             MATCH (a)-[rev1:LINK_TO_AGG]->(s)
 
-                WHERE rev1.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             WHERE rev1.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                MATCH (b)-[rev2:LINK_TO_AGG]->(a)
+    #             MATCH (b)-[rev2:LINK_TO_AGG]->(a)
 
-                WHERE rev2.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             WHERE rev2.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                MATCH (s)-[rev3:LINK_TO_AGG]->(b)
+    #             MATCH (s)-[rev3:LINK_TO_AGG]->(b)
 
-                WHERE rev3.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+    #             WHERE rev3.sentiment >= {CYCLE_DETECTION_SENTIMENT}
 
-                RETURN p
+    #             RETURN p
 
-                """,
+    #             """,
 
-                out_cols="p agtype",
+    #             out_cols="p agtype",
 
-            )
+    #         )
 
-        return _timed_per_input(run, subreddit_names)
+    #     return _timed_per_input(run, subreddit_names)
 
-    def friends_of_friends(self, subreddit_names: list[str]):
+    # def friends_of_friends(self, subreddit_names: list[str]):
 
-        def run(name: str, pattern_length: int):
+    #     def run(name: str, pattern_length: int):
 
-            return self._exec(
+    #         return self._exec(
 
-                f"""
+    #             f"""
 
-                MATCH p = (s:Subreddit {{name: '{name}'}})-[:LINK_TO_AGG*1..{pattern_length}]->(friend:Subreddit)
+    #             MATCH p = (s:Subreddit {{name: '{name}'}})-[:LINK_TO_AGG*1..{pattern_length}]->(friend:Subreddit)
 
-                WITH p, nodes(p) AS pathNodes, relationships(p) AS pathRelationships
+    #             WITH p, nodes(p) AS pathNodes, relationships(p) AS pathRelationships
 
-                UNWIND pathRelationships AS r
+    #             UNWIND pathRelationships AS r
 
-                WITH p, pathNodes, pathRelationships, r
+    #             WITH p, pathNodes, pathRelationships, r
 
-                WHERE r.sentiment >= {FRIENDS_OF_FRIENDS_SENTIMENT}
+    #             WHERE r.sentiment >= {FRIENDS_OF_FRIENDS_SENTIMENT}
 
-                AND r.linkCount >= {MIN_LINKS_AGGREGATED}
+    #             AND r.linkCount >= {MIN_LINKS_AGGREGATED}
 
-                WITH p, pathNodes, pathRelationships, count(r) AS valid_count
+    #             WITH p, pathNodes, pathRelationships, count(r) AS valid_count
 
-                WHERE valid_count = length(p)
+    #             WHERE valid_count = length(p)
 
-                UNWIND pathNodes AS n
+    #             UNWIND pathNodes AS n
 
-                WITH p, count(n) AS total_count, count(DISTINCT id(n)) AS unique_count
+    #             WITH p, count(n) AS total_count, count(DISTINCT id(n)) AS unique_count
 
-                WHERE total_count = unique_count
+    #             WHERE total_count = unique_count
 
-                RETURN p
+    #             RETURN p
 
-                """,
+    #             """,
 
-                out_cols="p agtype",
+    #             out_cols="p agtype",
 
-            )
+    #         )
 
-        return _timed_match(run, subreddit_names)
+    #     return _timed_match(run, subreddit_names)
 
-    def __enter__(self):
+    # def __enter__(self):
 
-        return self
+    #     return self
 
-    def __exit__(
+    # def __exit__(
 
-        self,
+    #     self,
 
-        exc_type,
+    #     exc_type,
 
-        exc_val,
+    #     exc_val,
 
-        exc_tb,
+    #     exc_tb,
 
-    ):
+    # ):
 
-        self._conn.close()
+    #     self._conn.close()
 
-        return False
+    #     return False
 
 
 

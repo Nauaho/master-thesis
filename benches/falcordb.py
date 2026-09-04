@@ -396,30 +396,30 @@ class FalkorDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         return _timed_per_input(run, subreddit_names)
 
-    def friends_of_friends(self, subreddit_names: list[str]):
-        def run(name: str):
-            return self._exec(
-            f"""
-            MATCH (s:Subreddit {{name: $name}})
-            MATCH p = (s)-[:TRUE_FRIENDSHIP*1..{TRAVERSAL_LIMIT}]->(t:Community)
-            WITH p, t, nodes(p) AS ns
-            UNWIND ns AS n
-            WITH p, t, ns, count(DISTINCT n) AS distinctCount, count(n) AS totalCount
-            WHERE distinctCount = totalCount
+    # def friends_of_friends(self, subreddit_names: list[str]):
+    #     def run(name: str):
+    #         return self._exec(
+    #         f"""
+    #         MATCH (s:Subreddit {{name: $name}})
+    #         MATCH p = (s)-[:TRUE_FRIENDSHIP*1..{TRAVERSAL_LIMIT}]->(t:Community)
+    #         WITH p, t, nodes(p) AS ns
+    #         UNWIND ns AS n
+    #         WITH p, t, ns, count(DISTINCT n) AS distinctCount, count(n) AS totalCount
+    #         WHERE distinctCount = totalCount
 
-            WITH t, p,
-                length(p) AS hopDistance,
-                reduce(total = 0.0, rel IN relationships(p) | total + rel.sentiment) / length(p) AS avgPathSentiment
-            ORDER BY t.name, hopDistance ASC, avgPathSentiment DESC
-            WITH t, collect({{path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment}})[0] AS best
+    #         WITH t, p,
+    #             length(p) AS hopDistance,
+    #             reduce(total = 0.0, rel IN relationships(p) | total + rel.sentiment) / length(p) AS avgPathSentiment
+    #         ORDER BY t.name, hopDistance ASC, avgPathSentiment DESC
+    #         WITH t, collect({{path: p, hopDistance: hopDistance, avgPathSentiment: avgPathSentiment}})[0] AS best
 
-            RETURN t.name AS reachedSubreddit,
-                best.hopDistance AS hopDistance,
-                best.avgPathSentiment AS avgPathSentiment
-            ORDER BY hopDistance ASC, avgPathSentiment DESC
-            """, 
-            name=name)
-        return _timed_per_input(run, subreddit_names)
+    #         RETURN t.name AS reachedSubreddit,
+    #             best.hopDistance AS hopDistance,
+    #             best.avgPathSentiment AS avgPathSentiment
+    #         ORDER BY hopDistance ASC, avgPathSentiment DESC
+    #         """, 
+    #         name=name)
+    #     return _timed_per_input(run, subreddit_names)
 
     def __enter__(self):
         return self
