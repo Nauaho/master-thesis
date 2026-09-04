@@ -3,6 +3,7 @@
 import time
 import csv
 import json
+from collections import defaultdict
 from datetime import datetime, timezone
 import traceback
 
@@ -18,14 +19,20 @@ from .base import (
     EXPECTED_EMBEDDED_NODE_COUNT,
     TRAVERSAL_LIMIT,
     FRIENDS_OF_FRIENDS_SENTIMENT,
+    ADAMIC_AGAR_MIN_SENTIMENT,
+    CYCLE_DETECTION_SENTIMENT,
+    MIN_LINKS_AGGREGATED,
+    P99_DEGREE,
     _timed_repeated,
     _timed_index_build,
     _timed_per_input,
-    _timed_match,
 )
 
 INDEX_NAME = "subreddit_embeddings"
 EMBEDDING_DIMENSION = 300
+MAX_HOPS = 5  # friends-of-friends hop cap — kept as its own named constant to
+              # avoid the recurring TRAVERSAL_LIMIT/hop-count mix-up seen in
+              # the other engine ports
 
 
 class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
@@ -67,6 +74,21 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                 ON TABLE subreddit
                 TYPE option<array<float>>;
 
+            DEFINE FIELD OVERWRITE degree
+                ON TABLE subreddit
+                TYPE int
+                DEFAULT 0;
+
+            DEFINE FIELD OVERWRITE out_degree
+                ON TABLE subreddit
+                TYPE int
+                DEFAULT 0;
+
+            DEFINE FIELD OVERWRITE in_degree
+                ON TABLE subreddit
+                TYPE int
+                DEFAULT 0;
+
             DEFINE INDEX OVERWRITE subreddit_name
                 ON TABLE subreddit
                 FIELDS name UNIQUE;
@@ -92,10 +114,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             DEFINE FIELD OVERWRITE properties
                 ON TABLE link_to
                 TYPE array<float>;
-
-            DEFINE INDEX OVERWRITE link_to_in_out
-                ON TABLE link_to
-                FIELDS in, out;
 
             DEFINE TABLE OVERWRITE link_to_agg
                 TYPE RELATION
@@ -125,6 +143,11 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             self._define_schema()
             self._import_subreddits()
             self._import_links()
+            self._exec("""
+            DEFINE INDEX OVERWRITE link_to_in_out
+                ON TABLE link_to
+                FIELDS in, out;
+            """)
         except Exception as e:
             traceback.print_exc()
             raise BenchmarkImportError(f"SurrealDB import failed: {e}") from e
@@ -183,9 +206,9 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
                             raise ValueError(
                                 f"Expected {EMBEDDING_DIMENSION}-dimensional embedding"
                             )
-                        
+
                         vector = [float(value) for value in embedding]
-                        if(any(vector)):
+                        if any(vector):
                             record["embedding"] = vector
                         else:
                             continue
@@ -203,7 +226,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
             if batch:
                 self._insert_subreddit_batch(batch)
-
 
     def _insert_subreddit_batch(self, rows):
         self._exec(
@@ -290,7 +312,7 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
 
         result_edges = self._exec("SELECT count() AS c FROM link_to GROUP ALL;")
         edge_count = result_edges[0]["c"] if result_edges else 0
-        
+
         errors = []
         if node_count != EXPECTED_NODE_COUNT:
             errors.append(f"node count: expected {EXPECTED_NODE_COUNT}, got {node_count}")
@@ -299,7 +321,6 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
         if edge_count != EXPECTED_EDGE_COUNT:
             errors.append(f"edge count: expected {EXPECTED_EDGE_COUNT}, got {edge_count}")
 
-        # it is unsafe, idgaf
         bad_length_count = self._exec(f"""
             SELECT count() AS c FROM subreddit
             WHERE embedding IS NOT NONE AND array::len(embedding) != {EMBEDDING_DIMENSION}
@@ -376,58 +397,72 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             cleanup=drop,
         )
 
-    def persist_aggregation(self):
-        self._exec("""
-            LET $pairs = SELECT
-                in,
-                out,
-                math::mean(sentiment_score) AS sentiment,
-                count() AS link_count
-            FROM link_to
-            GROUP BY in, out;
+    # def persist_aggregation(self):
+    #     self._exec("""
+    #         LET $pairs = SELECT
+    #             in,
+    #             out,
+    #             math::mean(sentiment_score) AS sentiment,
+    #             count() AS link_count
+    #         FROM link_to
+    #         GROUP BY in, out;
 
-            INSERT RELATION INTO link_to_agg $pairs;
-        """)
+    #         INSERT RELATION INTO link_to_agg $pairs;
+    #     """)
 
-        self._exec(
-            """
-            REBUILD INDEX link_to_agg_in_out
-            ON TABLE link_to_agg;
-            """
-        )
+    #     self._exec(
+    #         """
+    #         REBUILD INDEX link_to_agg_in_out
+    #         ON TABLE link_to_agg;
+    #         """
+    #     )
 
-        self._exec(
-            """
-            REBUILD INDEX agg_link_sentiment
-            ON TABLE link_to_agg;
-            """
-        )
+    #     self._exec(
+    #         """
+    #         REBUILD INDEX agg_link_sentiment
+    #         ON TABLE link_to_agg;
+    #         """
+    #     )
 
-        edge_agg_count = self._exec(
-            """
-            SELECT count() AS c
-            FROM link_to_agg
-            GROUP ALL;
-            """
-        )[0]["c"]
+    #     self._exec("""
+    #     UPDATE subreddit SET
+    #         out_degree = array::len(->link_to_agg),
+    #         in_degree  = array::len(<-link_to_agg),
+    #         degree     = array::len(->link_to_agg) + array::len(<-link_to_agg);
+    #     """)
 
-        if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
-            raise BenchmarkImportError(
-                f"SurrealDB aggregation validation failed: "
-                f"expected {EXPECTED_EDGE_AGG_COUNT}, "
-                f"got {edge_agg_count}"
-            )
+    #     self._exec(
+    #     """
+    #     DEFINE INDEX link_to_agg_link_count ON link_to_agg FIELDS link_count;
+    #     DEFINE INDEX subreddit_degree ON subreddit FIELDS degree;
+    #     """
+    #     )
+
+    #     edge_agg_count = self._exec(
+    #         """
+    #         SELECT count() AS c
+    #         FROM link_to_agg
+    #         GROUP ALL;
+    #         """
+    #     )[0]["c"]
+
+    #     if edge_agg_count != EXPECTED_EDGE_AGG_COUNT:
+    #         raise BenchmarkImportError(
+    #             f"SurrealDB aggregation validation failed: "
+    #             f"expected {EXPECTED_EDGE_AGG_COUNT}, "
+    #             f"got {edge_agg_count}"
+    #         )
 
     def aggregate_graph(self):
         def run():
             return self._exec("""
                 SELECT
-                    in.name AS source,
-                    out.name AS target,
-                    math::sum(sentiment_score) AS sentiment,
+                    in AS source,
+                    out AS target,
+                    math::mean(sentiment_score) AS sentiment,
                     count() AS link_count
                 FROM link_to
-                GROUP BY in, out
+                GROUP BY source, target
                 ORDER BY sentiment DESC;
             """)
 
@@ -436,166 +471,69 @@ class SurrealDBBenchmark(GraphBenchmarks, VectorBenchmarks):
             n=5,
         )
 
-    def adamic_adar(
-        self,
-        subreddit_names: list[str],
-    ):
-        def run(name: str):
-            return self._exec(
-                """
-                LET $s = type::thing(
-                    'subreddit',
-                    $name
-                );
+    # def adamic_adar(
+    #     self,
+    #     subreddit_names: list[str],
+    # ):
+    #     def run(name: str):
+    #         return self._exec(
+    #             f"""
+    #             LET $s = (SELECT VALUE id FROM subreddit WHERE name = "{name}" LIMIT 1)[0];
+    #             LET $minSentiment = {ADAMIC_AGAR_MIN_SENTIMENT};
+    #             LET $hubDegreeCap = {P99_DEGREE};
+ 
+    #             LET $commons = SELECT out AS common, sentiment AS r1_sentiment, out.degree AS common_degree
+    #                         FROM link_to_agg
+    #                         WHERE in = $s AND sentiment > $minSentiment AND out.degree < $hubDegreeCap;
+ 
+    #             LET $bridges = SELECT in AS new_friend, in.name AS new_friend_name, out AS common, sentiment AS r2_sentiment
+    #                         FROM link_to_agg
+    #                         WHERE out IN $commons.common AND sentiment > $minSentiment;
+ 
+    #             LET $already_out = SELECT VALUE out FROM link_to_agg WHERE in = $s;
+    #             LET $already_in = SELECT VALUE in FROM link_to_agg WHERE out = $s;
+ 
+    #             RETURN {{ s: $s, commons: $commons, bridges: $bridges, already_out: $already_out, already_in: $already_in }};
 
-                LET $common = array::distinct(
-                    $s
-                    ->(link_to_agg
-                        WHERE sentiment > 0.33
-                    )
-                    ->subreddit
-                );
+    #             """
+    #         )
 
-                LET $candidates = array::complement(
-                    array::distinct(
-                        $common
-                        <-(link_to_agg
-                            WHERE sentiment > 0.33
-                        )
-                        <-subreddit
-                    ),
-                    [$s]
-                );
+    #     return _timed_per_input(
+    #         run,
+    #         subreddit_names,
+    #     )
 
-                SELECT
-                    id AS new_friend_id,
-                    name AS new_friend,
+    # def friends_of_friends(
+    #     self,
+    #     subreddit_names: list[str],
+    # ):
+    #     def run(name: str):
+    #         return self._exec(
+    #             f"""
+    #             LET $s = (SELECT VALUE id FROM subreddit WHERE name = "{name}" LIMIT 1)[0];
+    #             LET $minSentiment = {FRIENDS_OF_FRIENDS_SENTIMENT};
+    #             LET $minLinkCount = {MIN_LINKS_AGGREGATED};
+    #             LET $degreeCap = {P99_DEGREE};
+ 
+    #             LET $hop1 = SELECT in AS from_node, out AS node, sentiment FROM link_to_agg
+    #                 WHERE in = $s AND sentiment > $minSentiment AND link_count > $minLinkCount AND out.degree < $degreeCap;
+    #             LET $hop2 = SELECT in AS from_node, out AS node, sentiment FROM link_to_agg
+    #                 WHERE in IN $hop1.node AND sentiment > $minSentiment AND link_count > $minLinkCount AND out.degree < $degreeCap;
+    #             LET $hop3 = SELECT in AS from_node, out AS node, sentiment FROM link_to_agg
+    #                 WHERE in IN $hop2.node AND sentiment > $minSentiment AND link_count > $minLinkCount AND out.degree < $degreeCap;
+    #             LET $hop4 = SELECT in AS from_node, out AS node, sentiment FROM link_to_agg
+    #                 WHERE in IN $hop3.node AND sentiment > $minSentiment AND link_count > $minLinkCount AND out.degree < $degreeCap;
+    #             LET $hop5 = SELECT in AS from_node, out AS node, sentiment FROM link_to_agg
+    #                 WHERE in IN $hop4.node AND sentiment > $minSentiment AND link_count > $minLinkCount AND out.degree < $degreeCap;
+ 
+    #             RETURN {{ hop1: $hop1, hop2: $hop2, hop3: $hop3, hop4: $hop4, hop5: $hop5 }};
+    #             """
+    #         )
 
-                    (
-                        SELECT VALUE sentiment
-                        FROM ONLY link_to_agg
-                        WHERE in = $s
-                          AND out IN $common
-                          AND sentiment > 0.33
-                        ORDER BY sentiment DESC
-                        LIMIT 1
-                    ) AS r1_sentiment,
-
-                    (
-                        SELECT VALUE sentiment
-                        FROM ONLY link_to_agg
-                        WHERE out IN $common
-                          AND in = $parent.id
-                          AND sentiment > 0.33
-                        ORDER BY sentiment DESC
-                        LIMIT 1
-                    ) AS r2_sentiment
-
-                FROM $candidates
-
-                WHERE id NOT IN (
-                    $s->link_to_agg->subreddit
-                )
-
-                AND id NOT IN (
-                    $s<-link_to_agg<-subreddit
-                )
-
-                LIMIT 100;
-                """,
-                {"name": name},
-            )
-
-        return _timed_per_input(
-            run,
-            subreddit_names,
-        )
-
-    def cycle_detection(
-        self,
-        subreddit_names: list[str],
-        category: str = "positive",
-    ):
-        op = self._sentiment_op(category)
-
-        def run(name: str):
-            return self._exec(
-                f"""
-                LET $s = type::thing(
-                    'subreddit',
-                    $name
-                );
-
-                SELECT * FROM ONLY (
-                    $s
-                        ->(link_to_agg
-                            WHERE sentiment {op}
-                        )->subreddit
-
-                        ->(link_to_agg
-                            WHERE sentiment {op}
-                        )->subreddit
-
-                        ->(link_to_agg
-                            WHERE sentiment {op}
-                        )->subreddit
-                )
-
-                WHERE id = $s
-
-                LIMIT {TRAVERSAL_LIMIT};
-                """,
-                {"name": name},
-            )
-
-        return _timed_per_input(
-            run,
-            subreddit_names,
-        )
-
-    def friends_of_friends(
-        self,
-        subreddit_names: list[str],
-        pattern_lengths: range,
-    ):
-        def run(
-            pattern_length: int,
-            name: str,
-        ):
-            return self._exec(
-                f"""
-                LET $s = type::thing(
-                    'subreddit',
-                    $name
-                );
-
-                LET $raw = $s.{{{pattern_length}+path}}(
-                    ->(
-                        link_to_agg
-                        WHERE sentiment >
-                            {FRIENDS_OF_FRIENDS_SENTIMENT}
-                    )->subreddit
-                );
-
-                RETURN array::filter(
-                    $raw,
-                    |$p|
-                        $p.len() =
-                        array::distinct($p).len()
-                )[0..{TRAVERSAL_LIMIT}];
-                """,
-                {"name": name},
-            )
-
-        return _timed_match(
-            run,
-            pattern_lengths,
-            subreddit_names,
-        )
-
-    # ------------------------------------------------------------------
-    # Vector search
-    # ------------------------------------------------------------------
+    #     return _timed_per_input(
+    #         run,
+    #         subreddit_names,
+    #     )
 
     def knn(
         self,

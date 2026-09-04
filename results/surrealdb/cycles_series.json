@@ -1,0 +1,11 @@
+{
+  "cold_run": null,
+  "hot_runs": [],
+  "errors": [
+    "input='minecraft': Parse error: Unexpected token `{`, expected Eof\n --> [5:38]\n  |\n5 | LET $raw_paths = $s.@{3+path}->(link_to_agg WHERE sentiment > $minSentiment)-...\n  |                      ^\n",
+    "input='anime': Parse error: Unexpected token `{`, expected Eof\n --> [5:38]\n  |\n5 | LET $raw_paths = $s.@{3+path}->(link_to_agg WHERE sentiment > $minSentiment)-...\n  |                      ^\n",
+    "input='socialism': Parse error: Unexpected token `{`, expected Eof\n --> [5:38]\n  |\n5 | LET $raw_paths = $s.@{3+path}->(link_to_agg WHERE sentiment > $minSentiment)-...\n  |                      ^\n",
+    "input='the_donald': Parse error: Unexpected token `{`, expected Eof\n --> [5:38]\n  |\n5 | LET $raw_paths = $s.@{3+path}->(link_to_agg WHERE sentiment > $minSentiment)-...\n  |                      ^\n",
+    "input='conspiracy': Parse error: Unexpected token `{`, expected Eof\n --> [5:38]\n  |\n5 | LET $raw_paths = $s.@{3+path}->(link_to_agg WHERE sentiment > $minSentiment)-...\n  |                      ^\n"
+  ]
+}

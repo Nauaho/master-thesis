@@ -63,7 +63,7 @@ def main():
     # Find all JSON files recursively, excluding friends_of_friends_series.json
     json_files = sorted([
         f for f in directory.rglob('*.json')
-        if f.name != 'friends_of_friends_series.json'
+        # if f.name != 'friends_of_friends_series.json'
     ])
     
     if not json_files:

@@ -1,0 +1,11 @@
+{
+  "cold_run": null,
+  "hot_runs": [],
+  "errors": [
+    "input='minecraft': Parse error: Unexpected token `an identifier`, expected Eof\n  --> [24:17]\n   |\n24 | HAVING common_neighbors_count >= 3\n   | ^^^^^^\n",
+    "input='anime': Parse error: Unexpected token `an identifier`, expected Eof\n  --> [24:17]\n   |\n24 | HAVING common_neighbors_count >= 3\n   | ^^^^^^\n",
+    "input='socialism': Parse error: Unexpected token `an identifier`, expected Eof\n  --> [24:17]\n   |\n24 | HAVING common_neighbors_count >= 3\n   | ^^^^^^\n",
+    "input='the_donald': Parse error: Unexpected token `an identifier`, expected Eof\n  --> [24:17]\n   |\n24 | HAVING common_neighbors_count >= 3\n   | ^^^^^^\n",
+    "input='conspiracy': Parse error: Unexpected token `an identifier`, expected Eof\n  --> [24:17]\n   |\n24 | HAVING common_neighbors_count >= 3\n   | ^^^^^^\n"
+  ]
+}
