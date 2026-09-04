@@ -1,7 +1,3 @@
-import csv
-import json
-import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -13,11 +9,14 @@ from .base import (
     _timed_repeated,
     _timed_per_input,
     _timed_match,
-    EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET,
+    CYCLE_DETECTION_SENTIMENT,
+    ADAMIC_AGAR_MIN_SENTIMENT,
+    MIN_LINKS_AGGREGATED,
     EXPECTED_EDGE_COUNT,
     EXPECTED_EDGE_AGG_COUNT,
-    TRAVERSAL_LIMIT,
-    FRIENDS_OF_FRIENDS_SENTIMENT
+    EXPECTED_NODE_COUNT,
+    FRIENDS_OF_FRIENDS_SENTIMENT,
+    P99_DEGREE
 )
 
 
@@ -74,6 +73,23 @@ class AGEBenchmark(GraphBenchmarks):
     @staticmethod
     def _escape(value: str) -> str:
         return value.replace("'", "\\'")
+
+    def _create_labels(self) -> None:
+        print("Creating vertex/edge labels...")
+
+        try:
+            self._conn.execute(
+                f"SELECT create_vlabel('{GRAPH_NAME}', 'Subreddit')"
+            )
+        except psycopg.errors.UniqueViolation:
+            pass
+
+        try:
+            self._conn.execute(
+                f"SELECT create_elabel('{GRAPH_NAME}', 'LINK_TO')"
+            )
+        except psycopg.errors.UniqueViolation:
+            pass
 
     def _create_indexes(self) -> None:
         """
@@ -202,15 +218,13 @@ class AGEBenchmark(GraphBenchmarks):
             )[0][0]
         )
 
-        print(f"{edge_count} : {type(edge_count)}")
-        print(f"{node_count} : {type(node_count)}")
         errors = []
 
-        if node_count != EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET:
+        if node_count != EXPECTED_NODE_COUNT + 9:
             errors.append(
                 "node count benchmark mismatch: "
                 f"expected "
-                f"{EXPECTED_NODES_WITHOUT_EMBEDDED_DATASET}, "
+                f"{EXPECTED_NODE_COUNT + 9}, "
                 f"got {node_count}"
             )
 
@@ -231,39 +245,34 @@ class AGEBenchmark(GraphBenchmarks):
         return node_count, edge_count
 
     def import_data(self):
-        """
-        Import the Reddit dataset using AGEFreighter.
-
-        Pipeline:
-
-            Reddit TSV files
-                ↓
-            preprocess to CSV
-                ↓
-            load_from_csv()
-                ↓
-            indexes
-                ↓
-            ANALYZE
-                ↓
-            final validation
-        """
         try:
             print("=== AGE Reddit import ===")
-                
-            self._conn.execute(f"""
-            load_labels_from_file('{GRAPH_NAME}', 'Subreddit', age/regress/age_load/data/subreddits.csv)
-            """)
-            self._conn.execute(f"""
-            load_labels_from_file('{GRAPH_NAME}', 'LINK_TO', age/regress/age_load/data/links.csv)
-            """)
+
+            self._create_labels()
+
+            self._conn.execute(
+                f"""
+                SELECT load_labels_from_file(
+                    '{GRAPH_NAME}',
+                    'Subreddit',
+                    'data/normalised_csvs/subreddits_light.csv'
+                )
+                """
+            )
+
+            self._conn.execute(
+                f"""
+                SELECT load_edges_from_file(
+                    '{GRAPH_NAME}',
+                    'LINK_TO',
+                    'data/normalised_csvs/links_age.csv'
+                )
+                """
+            )
 
             self._create_indexes()
-
-            # Update planner statistics.
             self._analyze()
 
-            # One validation pass.
             return self._validate_import()
 
         except BenchmarkImportError:
@@ -273,6 +282,8 @@ class AGEBenchmark(GraphBenchmarks):
             raise BenchmarkImportError(f"AGE import failed: {e}") from e
 
     def persist_aggregation(self):
+        print("Aggregating LINK_TO edges...")
+
         self._exec(
             """
             MATCH (s:Subreddit)-[r:LINK_TO]->(t:Subreddit)
@@ -284,42 +295,41 @@ class AGEBenchmark(GraphBenchmarks):
             """
         )
 
-        self._conn.execute(
-        f"""
-            CREATE INDEX IF NOT EXISTS
-            idx_link_to_id
-            ON {GRAPH_NAME}."LINK_TO_AGG"
-            USING BTREE (id);
-        """
-        )
-
+        # LINK_TO_AGG indexes created immediately — every materialization
+        # step below filters/traverses on agg.sentiment, so they need to
+        # exist before those queries run, not just before benchmarking.
         self._conn.execute(
             f"""
             CREATE INDEX IF NOT EXISTS
-            idx_link_to_properties
+            idx_link_to_agg_id
+            ON {GRAPH_NAME}."LINK_TO_AGG"
+            USING BTREE (id);
+            """
+        )
+        self._conn.execute(
+            f"""
+            CREATE INDEX IF NOT EXISTS
+            idx_link_to_agg_properties
             ON {GRAPH_NAME}."LINK_TO_AGG"
             USING GIN (properties);
             """
         )
-
         self._conn.execute(
             f"""
             CREATE INDEX IF NOT EXISTS
-            idx_link_to_start_id
+            idx_link_to_agg_start_id
             ON {GRAPH_NAME}."LINK_TO_AGG"
             USING BTREE (start_id);
             """
         )
-
         self._conn.execute(
             f"""
             CREATE INDEX IF NOT EXISTS
-            idx_link_to_end_id
+            idx_link_to_agg_end_id
             ON {GRAPH_NAME}."LINK_TO_AGG"
             USING BTREE (end_id);
             """
         )
-
         self._conn.execute(
             f"""
             CREATE INDEX idx_link_agg_sentimentScore
@@ -340,9 +350,9 @@ class AGEBenchmark(GraphBenchmarks):
         edge_agg_count = int(
             self._exec(
                 """
-            MATCH ()-[r:LINK_TO_AGG]->()
-            RETURN count(r)
-            """
+                MATCH ()-[r:LINK_TO_AGG]->()
+                RETURN count(r)
+                """
             )[0][0]
         )
 
@@ -353,8 +363,54 @@ class AGEBenchmark(GraphBenchmarks):
                 f"got {edge_agg_count}"
             )
 
-    def aggregate_graph(self):
+        print("Materializing FRIENDSHIP edges...")
+        self._exec(
+            f"""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= {CYCLE_DETECTION_SENTIMENT}
+            CREATE (s)-[:FRIENDSHIP]->(t)
+            """
+        )
 
+        print("Materializing LOVE edges...")
+        self._exec(
+            f"""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= {ADAMIC_AGAR_MIN_SENTIMENT}
+            CREATE (s)-[:LOVE]->(t)
+            """
+        )
+
+        print("Materializing TRUE_FRIENDSHIP edges...")
+        self._exec(
+            f"""
+            MATCH (s:Subreddit)-[agg:LINK_TO_AGG]->(t:Subreddit)
+            WHERE agg.sentiment >= {FRIENDS_OF_FRIENDS_SENTIMENT}
+            AND agg.linkCount >= {MIN_LINKS_AGGREGATED}
+            CREATE (s)-[:TRUE_FRIENDSHIP]->(t)
+            """
+        )
+
+        for label in ("FRIENDSHIP", "LOVE", "TRUE_FRIENDSHIP"):
+            self._conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS
+                idx_{label.lower()}_start_id
+                ON {GRAPH_NAME}."{label}"
+                USING BTREE (start_id);
+                """
+            )
+            self._conn.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS
+                idx_{label.lower()}_end_id
+                ON {GRAPH_NAME}."{label}"
+                USING BTREE (end_id);
+                """
+            )
+            self._conn.execute(f'ANALYZE {GRAPH_NAME}."{label}";')
+
+    def aggregate_graph(self):
         def run():
             return self._exec(
                 """
@@ -362,12 +418,12 @@ class AGEBenchmark(GraphBenchmarks):
                 RETURN
                     s.name,
                     t.name,
-                    avg(toFloat(r.sentimentScore)) AS avgSentiment,
+                    avg(r.sentiment) AS sentiment,
                     count(r)
-                ORDER BY sumSentiment DESC
+                ORDER BY sentiment DESC
                 """,
                 out_cols=(
-                    "source agtype, target agtype, sentiment agtype, linkCount agtype"
+                    "source agtype, target agtype, sentiment agtype, link_count agtype"
                 ),
             )
 
@@ -376,62 +432,66 @@ class AGEBenchmark(GraphBenchmarks):
             n=5,
         )
 
-    def adamic_adar(
-        self,
-        subreddit_names: list[str],
-    ):
-
+    def adamic_adar(self, subreddit_names: list[str]):
         def run(name: str):
-
             return self._exec(
                 f"""
-                MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(common:Subreddit)<-[r2:LINK_TO_AGG]-(newFriend:Subreddit)
-                    OPTIONAL MATCH (s)-[mustNotExistOne:LINK_TO_AGG]->(newFriend)
-                    OPTIONAL MATCH (newFriend)-[mustNotExistTwo:LINK_TO_AGG]->(s)
-                WHERE r1.sentiment > 0.33 AND r2.sentiment > 0.33 AND s <> newFriend
-                    AND mustNotExistOne IS NULL AND mustNotExistTwo IS NULL
-                RETURN newFriend.name, r2.sentiment - r1.sentiment AS delta_interest
-                ORDER BY
-                    delta_interest DESC
+                MATCH (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LOVE]->(common:Subreddit)
+                WHERE common.degree <= {P99_DEGREE}
+                MATCH (common)<-[r2:LOVE]-(newFriend:Subreddit)
+                WHERE newFriend.degree <= {P99_DEGREE} AND s <> newFriend
+                OPTIONAL MATCH (s)-[notExist1:LINK_TO_AGG]-(newFriend)
+                OPTIONAL MATCH (s)-[notExist2:FRIENDSHIP]-(newFriend)
+                OPTIONAL MATCH (s)-[notExist3:LOVE]-(newFriend)
+                WITH newFriend, common, r1, r2, notExist1, notExist2, notExist3
+                WHERE notExist1 IS NULL AND notExist2 IS NULL AND notExist3 IS NULL
+                WITH newFriend,
+                    count(DISTINCT common) AS commonNeighborsCount,
+                    avg(abs(r1.sentiment - r2.sentiment)) AS avgDeltaSentiment,
+                    sum(1.0 / log(common.degree + 2)) AS adamicAdarScore
+                WHERE commonNeighborsCount >= 3
+                RETURN newFriend.name,
+                    commonNeighborsCount,
+                    avgDeltaSentiment,
+                    adamicAdarScore,
+                    adamicAdarScore * (1 - avgDeltaSentiment) AS combinedScore
+                ORDER BY combinedScore DESC
                 """,
-                out_cols=("newFriend agtype, delta_interest agtype"),
+                out_cols=(
+                    "suggested agtype, commonNeighborsCount agtype, "
+                    "avgDeltaSentiment agtype, adamicAdarScore agtype, combinedScore agtype"
+                ),
             )
 
-        return _timed_per_input(
-            run,
-            subreddit_names,
-        )
+        return _timed_per_input(run, subreddit_names)
 
-    def cycle_detection(
-        self,
-        subreddit_names: list[str],
-        category: str = "positive",
-    ):
-        op = self._sentiment_op(category)
-
+    def cycle_detection(self, subreddit_names: list[str]):
         def run(name: str):
             return self._exec(
                 f"""
-                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:LINK_TO_AGG]->(a:Subreddit)-[r2:LINK_TO_AGG]->(b:Subreddit)-[r3:LINK_TO_AGG]->(s)
-                WHERE r1.sentiment {op} AND r2.sentiment {op} AND r3.sentiment {op} AND a <> b
+                MATCH p = (s:Subreddit {{name: '{self._escape(name)}'}})-[r1:FRIENDSHIP]->(a:Subreddit)-[r2:FRIENDSHIP]->(b:Subreddit)-[r3:FRIENDSHIP]->(s)
+                WHERE a <> b AND a.name < b.name
+                AND a.degree <= {P99_DEGREE} AND b.degree <= {P99_DEGREE}
+                MATCH (a)-[rev1:FRIENDSHIP]->(s)
+                MATCH (b)-[rev2:FRIENDSHIP]->(a)
+                MATCH (s)-[rev3:FRIENDSHIP]->(b)
                 RETURN p
                 """,
                 out_cols="p agtype",
             )
 
-        return _timed_per_input(
-            run,
-            subreddit_names,
-        )
+        return _timed_per_input(run, subreddit_names)
 
     def friends_of_friends(self, subreddit_names: list[str]):
         def run(name: str, pattern_length: int):
             return self._exec(
                 f"""
-                 MATCH p = (s:Subreddit {{name: '{name}'}})-[:LINK_TO_AGG*{pattern_length}]->(friend:Subreddit)
-                                WHERE all(r IN relationships(p) WHERE r.sentiment > {FRIENDS_OF_FRIENDS_SENTIMENT})
-                                AND all(n IN nodes(p) WHERE single(x IN nodes(p) WHERE x = n))
-                                RETURN p
+                MATCH p = (s:Subreddit {{name: '{name}'}})-[:TRUE_FRIENDSHIP*1..{pattern_length}]->(friend:Subreddit)
+                WITH p, nodes(p) AS pathNodes
+                UNWIND pathNodes AS n
+                WITH p, count(n) AS total_count, count(DISTINCT id(n)) AS unique_count
+                WHERE total_count = unique_count
+                RETURN p
                 """,
                 out_cols="p agtype",
             )

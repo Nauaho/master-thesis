@@ -433,7 +433,7 @@ def write_edges(
     return edge_id - 1
 
 
-def main() -> None:
+def prepare_csvs() -> None:
     """
     Preprocess the Reddit hyperlink and embedding datasets.
 
@@ -580,4 +580,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    prepare_csvs()

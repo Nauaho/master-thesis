@@ -65,22 +65,22 @@ class DBSpec:
 
 
 db_specs = [
-    # DBSpec(
-    #     image=NEO4J,
-    #     internal_port=7687,
-    #     env={
-    #         "NEO4J_AUTH": "neo4j/password",
-    #         "NEO4J_dbms_directories_import": "/import",
-    #         "NEO4J_server_memory_heap_initial__size": "5g",
-    #         "NEO4J_server_memory_heap_max__size": "5g",
-    #         "NEO4J_server_memory_pagecache_size": "7g"
-    #     },
-    #     benchmark_cls=Neo4jBenchamrk,
-    #     wait_ready=wait_neo4j_ready,
-    #     volumes={
-    #         str(DATA_DIR): {"bind": "/import", "mode": "ro"}
-    #     },
-    # ),
+    DBSpec(
+        image=NEO4J,
+        internal_port=7687,
+        env={
+            "NEO4J_AUTH": "neo4j/password",
+            "NEO4J_dbms_directories_import": "/import",
+            "NEO4J_server_memory_heap_initial__size": "5g",
+            "NEO4J_server_memory_heap_max__size": "5g",
+            "NEO4J_server_memory_pagecache_size": "7g"
+        },
+        benchmark_cls=Neo4jBenchamrk,
+        wait_ready=wait_neo4j_ready,
+        volumes={
+            str(DATA_DIR): {"bind": "/import", "mode": "ro"}
+        },
+    ),
     # DBSpec(
     #     image=REDIS,
     #     internal_port=6379,
@@ -138,27 +138,27 @@ db_specs = [
     #     benchmark_cls=PostgresGraphBenchmark,
     #         wait_ready=wait_postgres_sql_ready,
     # ),
-    DBSpec(
-        image=SURREAL,
-        internal_port=8000,
-        env={},
-        volumes={},
-        benchmark_cls=SurrealDBBenchmark,
-        wait_ready=wait_surrealdb_ready,
-        command=[
-            "start",
-            "--user", "root",
-            "--password", "root",
-            "rocksdb:///tmp/surreal.db",
-        ],
-    ),
+    # DBSpec(
+    #     image=SURREAL,
+    #     internal_port=8000,
+    #     env={},
+    #     volumes={},
+    #     benchmark_cls=SurrealDBBenchmark,
+    #     wait_ready=wait_surrealdb_ready,
+    #     command=[
+    #         "start",
+    #         "--user", "root",
+    #         "--password", "root",
+    #         "rocksdb:///tmp/surreal.db",
+    #     ],
+    # # ),
     # DBSpec(
     #     image=AGE,
     #     internal_port=5432,
     #     env={"POSTGRES_PASSWORD": "password"},
     #     volumes={
     #         str(PGTUNE_CONF): {"bind": "/etc/postgresql/postgresql.conf", "mode": "ro"},
-    #         str(DATA_DIR): {"bind": "/age/regress/age_load/data", "mode": "ro"}
+    #         str(DATA_DIR): {"bind": "/tmp/age/data", "mode": "ro"}
     #     },
     #     command=[
     #         "postgres",
